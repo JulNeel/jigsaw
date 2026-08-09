@@ -1,0 +1,9 @@
+-- Baseline migration (Story 1.1: project bootstrap).
+--
+-- Intentionally empty of domain tables. Per the "create tables only when
+-- needed" principle, Room/Piece/PieceAdjacency land in Epic 2 Story 2.4,
+-- Cluster in Epic 3 Story 3.8, RoomPresence in Epic 4 Story 4.1, and so on.
+--
+-- This migration exists so `supabase/migrations/` is a real, versioned
+-- history from the very first commit rather than an empty directory.
+select 1;

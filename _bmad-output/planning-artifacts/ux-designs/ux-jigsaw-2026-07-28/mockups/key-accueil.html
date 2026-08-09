@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Jigsaw — Accueil</title>
+<style>
+/* Illustre: EXPERIENCE.md IA "Accueil" (FR-11, liste persistée des Salons),
+   State Patterns "Accueil, premier accès (aucun Salon)" / "Accueil, chargement". */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  background: #78716c;
+  display: flex; gap: 32px; align-items: flex-start; justify-content: center;
+  min-height: 100vh; padding: 40px; flex-wrap: wrap;
+}
+.browser-frame { width: 480px; background: #FBF7F1; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+.browser-chrome { background: #FFFDF9; border-bottom: 1px solid #E3D6C2; padding: 10px 16px; display: flex; align-items: center; gap: 8px; }
+.dot { width: 10px; height: 10px; border-radius: 9999px; background: #E3D6C2; }
+.url-bar { flex: 1; background: #EFE6D8; border-radius: 6px; padding: 6px 12px; font-size: 12px; color: #6E6153; margin-left: 12px; }
+.header { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 4px; }
+h1 { font-size: 19px; color: #2B2621; }
+.new-btn { background: #A8541F; color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 13.5px; font-weight: 600; min-height: 40px; }
+.list { padding: 18px 24px 28px; display: flex; flex-direction: column; gap: 12px; }
+.salon-card {
+  display: flex; align-items: center; gap: 14px;
+  background: #FFFDF9; border: 1px solid #E3D6C2; border-radius: 10px; padding: 12px;
+}
+.thumb { width: 52px; height: 52px; border-radius: 8px; background: linear-gradient(135deg,#e2b183,#cf9563); flex-shrink: 0; }
+.info { flex: 1; }
+.info .name { font-size: 14.5px; font-weight: 600; color: #2B2621; }
+.info .meta { font-size: 12px; color: #6E6153; margin-top: 3px; }
+.badge-online { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: #7a5810; }
+.badge-online .d { width: 6px; height: 6px; border-radius: 9999px; background: #A67518; }
+.caption { margin-top: 14px; font-size: 12.5px; color: #44403c; background: #fff; padding: 12px 14px; border-radius: 8px; }
+
+/* empty state */
+.empty { padding: 60px 32px; text-align: center; }
+.empty .icon { font-size: 40px; margin-bottom: 14px; }
+.empty h2 { font-size: 17px; color: #2B2621; margin-bottom: 6px; }
+.empty p { font-size: 13.5px; color: #6E6153; margin-bottom: 22px; }
+</style>
+</head>
+<body>
+
+  <div class="browser-frame">
+    <div class="browser-chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar">jigsaw.app</div></div>
+    <div class="header"><h1>Vos Salons</h1><button class="new-btn">+ Créer un salon</button></div>
+    <div class="list">
+      <div class="salon-card">
+        <div class="thumb"></div>
+        <div class="info">
+          <div class="name">Le Salon de la famille Dupont</div>
+          <div class="meta">1247 pièces · 34 posées · <span class="badge-online"><span class="d"></span>3 en ligne</span></div>
+        </div>
+      </div>
+      <div class="salon-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#c9a876,#a8845a)"></div>
+        <div class="info">
+          <div class="name">Vacances en Bretagne 2025</div>
+          <div class="meta">500 pièces · 500 posées · Terminé</div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">État 1 — Illustre : IA "Accueil" (FR-11, liste persistée) · réalise la résolution d'UJ-1/UJ-2 (retour dans un Salon existant).</div>
+  </div>
+
+  <div class="browser-frame">
+    <div class="browser-chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar">jigsaw.app</div></div>
+    <div class="header"><h1>Vos Salons</h1><button class="new-btn">+ Créer un salon</button></div>
+    <div class="empty">
+      <div class="icon">🧩</div>
+      <h2>Aucun Salon pour l'instant</h2>
+      <p>Créez-en un pour votre famille, ou rejoignez celui d'un proche via un lien.</p>
+    </div>
+    <div class="caption">État 2 — Illustre : State Patterns "Accueil, premier accès (aucun Salon)". `[ASSUMPTION: copie exacte — cf. EXPERIENCE.md.]`</div>
+  </div>
+
+</body>
+</html>

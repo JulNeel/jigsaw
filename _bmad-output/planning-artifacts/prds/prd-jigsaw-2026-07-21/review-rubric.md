@@ -1,0 +1,61 @@
+# PRD Quality Review — Jigsaw (Salon V1)
+
+## Overall verdict
+The Salon experience itself — infinite canvas, Îlots, guest access, presence, stats — is specified with real discipline: Non-Goals carry reasons, the NFR is grounded in a documented competitor failure mode, and Success Metrics include a counter-metric that guards the stated thesis. But the PRD has a first-mile hole: Salon *creation* (photo upload, invite-link generation) is listed in MVP scope (§9.1) and named in a JTBD (§2.1), yet has zero FRs, zero UJs, and zero acceptance criteria — the actual entry point of the product is unspecified for downstream UX/architecture work. A handful of FRs also carry unbounded terms an engineer would have to resolve unilaterally. Fix the creation-flow gap and this is solid; as written, downstream work has nothing to build the first five minutes of the product from.
+
+## Decision-readiness — adequate
+Where the PRD makes a call, it mostly states it as a call and names what's given up. §6 is the strongest example: "épurée et moderne, choisie délibérément pour sa simplicité de mise en œuvre en V1 — pas de traitement 'chaleureux/cosy'" explicitly trades the brief's "table de cuisine" warmth for V1 shipping simplicity, and defers the warmer treatment to post-V1 rather than dropping it silently. §8's Non-Goals mostly carry reasons rather than bare exclusions (e.g., AI image generation is deferred for a named "risque IP/légal identifié," not just "not doing it"). The two Open Questions (§11) are genuinely open — no answer smuggled into the next sentence.
+
+The exception is §7 Platform: "Web et mobile en simultané dès la V1 — pas de séquencement web-first puis mobile." This is stated as a decision, but for a solo developer (§0: "Julien, développeur solo") committing to two platforms simultaneously in V1 is a major scope/risk decision, and the PRD gives it one sentence with no trade-off framing — no acknowledgment of what simultaneous delivery costs in velocity or testing surface, and no reasoning for why it's worth that cost against the Vision's stated goal of quickly validating with real families.
+
+### Findings
+- **high** Platform decision stated without trade-off (§7, "Web et mobile en simultané dès la V1") — a solo-dev, validation-first PRD commits to the highest-cost delivery shape (two platforms, no sequencing) with no rationale and no acknowledged cost. Contrast with §6, which models the trade-off framing this section lacks. *Fix:* add a sentence naming what simultaneous web+mobile costs (dev time, QA surface) and why that cost is accepted given the solo-dev constraint and the "validate quickly" thesis — or reconsider the sequencing.
+
+## Substance over theater — strong
+No findings needed. The Vision (§1) is anchored in a specific, non-swappable metaphor ("le puzzle physique laissé ouvert sur la table du salon familial") rather than generic aspirational language. The single NFR (§5, NFR-1) is not boilerplate — it names concrete competitor failure modes ("pièces qui 'giclent' à travers l'écran, blocages en bord d'écran") and cites the brief section they come from. Only one UJ is used, and it's used because Features 4.1–4.5 all cite it ("Réalise UJ-1") — no persona padding. No Differentiation-for-its-own-sake section, no copied "must be scalable/secure" filler.
+
+## Strategic coherence — adequate
+The thesis is explicit and specific: validate, with real families, that the digital reconstruction of the physical puzzle ritual "tient réellement" (§1) — not a generic "build an MVP" framing. Feature grouping (4.1–4.5) traces cleanly back to that thesis via "Réalise UJ-1" on every feature. Success Metrics reinforce rather than dilute the thesis: SM-2 (guest return rate) and SM-1 (Salon streak) measure the low-friction, come-back-when-you-want dynamic the Vision describes, and SM-C1 explicitly forbids optimizing session length in isolation — a real counter-metric, not decoration, protecting against turning "ponctual and satisfying" into "captive retention."
+
+The gap: §9.1 In Scope lists "Upload de photo personnelle pour créer le puzzle du Salon" and §2.1's fourth JTBD ("créateur d'un Salon... inviter facilement mes proches via WhatsApp") names Salon creation and invite generation as user needs — but no feature section, FR, or UJ in the document addresses either. The features that exist (4.1–4.5) all presuppose a Salon that already exists. See the critical finding under Done-ness clarity for the concrete impact.
+
+## Done-ness clarity — thin
+The PRD's best practice — explicit "Consequences (testable)" blocks — appears on FR-2, FR-6, FR-14, and FR-15, and each of those is genuinely verifiable. But roughly three-quarters of the FRs (FR-1, 3, 4, 5, 7, 8, 9, 11, 12, 13, 16) have no such block, and some of those hide real ambiguity behind a plausible-sounding sentence.
+
+### Findings
+- **critical** Salon creation has no FR at all (§9.1 In Scope: "Upload de photo personnelle pour créer le puzzle du Salon"; also implied by §2.1 JTBD #4 on inviting via WhatsApp) — this is the literal entry point of the product (someone has to create the Salon and generate the invite link before UJ-1 can happen), it's explicitly in MVP scope, and Open Question #2 only addresses moderation for it — not upload constraints, format, size, replacing an image, or how the invite link itself is generated and shared. Downstream UX/architecture work has nothing to source-extract for this flow. *Fix:* add a Feature section and FRs for Salon creation (photo upload flow, validation/constraints, invite-link generation) with the same testable-consequence treatment given to the other features, or explicitly move it to Non-Goals/Open Questions if it's genuinely undecided.
+- **medium** FR-6 integration threshold undefined ("Un Îlot... s'intègre automatiquement au Cadre par un effet d'aimantation dès qu'il est correctement positionné") — "correctement positionné" has no tolerance or distance bound; an engineer must invent the snap threshold. *Fix:* state the snap tolerance (or explicitly defer it to a design-spec addendum and say so).
+- **medium** FR-10 leave-trigger undefined ("Avant de quitter le Salon, le système propose... de s'inscrire") — "avant de quitter" doesn't specify what event fires this (explicit leave action vs. tab/app close, which browsers often can't intercept reliably). This FR feeds SM-2 (guest return rate) directly, so an incorrect implementation of the trigger has metric-level consequences. *Fix:* specify the concrete trigger event(s).
+- **medium** FR-12 "online" undefined ("Le Salon affiche les Participants actuellement en ligne") — no presence timeout or heartbeat definition given, so "currently online" is not directly testable. *Fix:* state the presence timeout (e.g., last-active within N seconds).
+- **low** FR-3 "état courant" is vague ("Le Cadre affiche l'état courant du puzzle assemblé") — likely self-evident (currently placed pieces) but stated without a consequence, unlike its sibling FRs in the same feature group.
+
+## Scope honesty — adequate
+§8 Non-Goals is genuinely honest — most exclusions carry a stated reason (monetization deferred "priorité à la validation de l'expérience," AI image generation deferred for "risque IP/légal identifié... non résolu," competitive ranking excluded to preserve the "non compétitif" positioning). The single `[ASSUMPTION]` (§4.5, on the no-ranking design choice) is correctly indexed in §12 and round-trips cleanly.
+
+The open-items density (2 Open Questions + 1 Assumption) reads low relative to what's actually unresolved in the document. Several points that surface as done-ness ambiguities above (§FR-6 snap tolerance, §FR-10 leave trigger, §FR-12 online definition) were left as plain declarative sentences rather than flagged as `[ASSUMPTION]` or Open Questions, and the Salon-creation gap (critical finding above) is in MVP scope with no honest flag that it's unspecified — Open Question #2 mentions only the moderation angle, creating a false impression that the feature is otherwise resolved.
+
+### Findings
+- **medium** Under-flagged ambiguities — the snap-tolerance, presence-timeout, and leave-trigger gaps (see Done-ness clarity) are stated as settled fact rather than marked `[ASSUMPTION]` or raised as Open Questions, understating how much is actually still open. *Fix:* either resolve these with concrete values or tag them explicitly so the reader isn't misled into thinking they're decided.
+
+## Downstream usability — adequate
+§0 states this PRD is meant to feed UX, architecture, and epics/stories, so this dimension carries real weight. FR IDs (FR-1–FR-16) are contiguous with no gaps or duplicates. SM cross-references resolve cleanly (SM-1 "Valide FR-8 à FR-16," SM-2 "Valide FR-8, FR-9, FR-10, FR-11," SM-3 "Valide FR-8, FR-12, FR-13" — all target existing FRs). Every feature section resolves its UJ reference via ID ("Réalise UJ-1") rather than "see above." UJ-1 has a named, contextualized protagonist (Mickaela, arriving from a WhatsApp invite from her nephew).
+
+Two minor gaps: the Glossary (§3) defines "Participant" and "Invité" but the FRs repeatedly use "Participant inscrit" (FR-11, FR-15, FR-16) as if it were a third formal tier — it isn't defined separately, though its meaning is inferable from context. Separately, §4.1's description ("un espace de navigation infini (façon Miro)") phrases the glossary term "Espace infini" slightly differently — cosmetic, not a substantive drift.
+
+The more consequential downstream issue is structural, not mechanical: JTBD #4 (§2.1, Salon creator inviting via WhatsApp) has no corresponding UJ — it's a floating JTBD, and it's the same gap already flagged as critical under Done-ness clarity.
+
+### Findings
+- **low** "Participant inscrit" used as a de facto third glossary tier (FR-11, FR-15, FR-16) without being defined alongside "Participant" and "Invité" in §3. *Fix:* add a Glossary entry or explicitly note it's a state of "Participant," not a separate role.
+
+## Shape fit — thin
+This is a consumer, multi-stakeholder-by-household product with meaningful UX (§1's whole premise rests on recreating a felt experience), which per the rubric makes named-protagonist UJs load-bearing — and it's explicitly chain-top (§0: feeds UX, architecture, stories), which raises the bar further rather than relaxing it for being solo-authored. Against that bar, one UJ covering only the "invited guest joins via link" path is under-formalized: §2.1 names four distinct JTBDs (casual contributor, invited guest, regular participant, Salon creator) but only the second is dramatized. The Salon-creator journey — the one that actually starts the product for any given family — has no UJ, which is the same root gap driving the critical Done-ness finding above.
+
+### Findings
+- **medium** Single UJ for a four-JTBD product (§2.1 vs. §2.2) — the Salon-creator and returning-registered-participant journeys are named as needs but never walked through, leaving downstream UX/architecture without dramatized context for the creation flow in particular. *Fix:* add at minimum a UJ for Salon creation (paired with the FR gap fix above); a UJ for a returning registered participant would also strengthen FR-11/FR-15 traceability.
+
+## Mechanical notes
+- Glossary: "Participant inscrit" used repeatedly (FR-11, FR-15, FR-16) without a formal Glossary entry; "Espace infini" vs. "un espace de navigation infini" (§4.1) is a cosmetic phrasing variant, not a conflict.
+- ID continuity: FR-1–FR-16 contiguous, no gaps/duplicates. Only one UJ (UJ-1) — not a continuity problem, but see Shape fit. SM-1/2/3/C1 numbering clean, all FR cross-references resolve.
+- Assumptions Index roundtrip: clean — one inline `[ASSUMPTION]` (§4.5), one matching entry in §12, no orphans either direction.
+- UJ protagonist naming: UJ-1's protagonist (Mickaela) is named and carries context inline (device, entry channel, relationship to the inviter) — meets the bar where it applies.
+- Required sections: all core sections for this stakes/type are present (Document Purpose, Vision, Target User, Glossary, Features w/ FRs, Cross-Cutting NFRs, a bespoke Aesthetic & Tone section fitted to this product, Platform, Non-Goals, MVP Scope, Success Metrics, Open Questions, Assumptions Index). No missing headers — the gaps found are in depth/coverage, not structure.

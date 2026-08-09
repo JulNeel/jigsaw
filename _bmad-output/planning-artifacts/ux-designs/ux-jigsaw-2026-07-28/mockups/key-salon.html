@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Jigsaw — Le Salon</title>
+<style>
+/* Illustre: EXPERIENCE.md Component Patterns (Pièce, Îlot, Bouton recentrer,
+   Présence en direct), State Patterns (Pièce/Îlot en déplacement, Îlots
+   multiples en parallèle), DESIGN.md Colors/Shapes/Components. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  background: #78716c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+.browser-frame {
+  width: 1100px;
+  max-width: 100%;
+  background: #FBF7F1;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+}
+.browser-chrome {
+  background: #FFFDF9;
+  border-bottom: 1px solid #E3D6C2;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot { width: 10px; height: 10px; border-radius: 9999px; background: #E3D6C2; }
+.url-bar {
+  flex: 1;
+  background: #EFE6D8;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #6E6153;
+  margin-left: 12px;
+}
+.canvas {
+  position: relative;
+  height: 640px;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(163,140,110,0.08), transparent 40%),
+    radial-gradient(circle at 85% 80%, rgba(163,140,110,0.06), transparent 40%),
+    #FBF7F1;
+  overflow: hidden;
+}
+/* Top overlay: presence + salon title */
+.top-bar {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  z-index: 5;
+}
+.salon-title { font-size: 15px; font-weight: 600; color: #2B2621; }
+.salon-title .sub { font-size: 12px; color: #6E6153; font-weight: 400; margin-top: 2px; }
+.presence {
+  display: flex; align-items: center; gap: -4px;
+  background: #FFFDF9;
+  border: 1px solid #E3D6C2;
+  border-radius: 9999px;
+  padding: 4px 10px 4px 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.avatar {
+  width: 26px; height: 26px; border-radius: 9999px;
+  background: #A8541F; color: #fff; font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #FFFDF9; margin-left: -8px;
+  position: relative;
+}
+.avatar:first-child { margin-left: 0; }
+.avatar .dot-online {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 8px; height: 8px; border-radius: 9999px;
+  background: #A67518; border: 1.5px solid #FFFDF9;
+}
+.presence-count { font-size: 12px; color: #6E6153; margin-left: 6px; }
+
+/* Cadre */
+.cadre {
+  position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
+  width: 420px; height: 300px;
+  border: 2px dashed #E3D6C2;
+  border-radius: 8px;
+  background: rgba(255,253,249,0.5);
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 2px;
+  padding: 6px;
+}
+.slot { border-radius: 3px; }
+.slot.filled { background: linear-gradient(135deg, #d8a173, #c98a54); }
+.slot.filled.corner-wrong { background: linear-gradient(135deg, #b98a63, #a8734a); outline: 1px dashed rgba(168,84,31,0.4); outline-offset: -2px; }
+.slot.empty { background: transparent; }
+
+.cadre-label {
+  position: absolute; top: 68px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: #6E6153; text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+/* Free pieces scattered */
+.piece {
+  position: absolute;
+  width: 34px; height: 34px;
+  background: linear-gradient(135deg, #e2b183, #cf9563);
+  border-radius: 6px;
+  box-shadow: 0 3px 6px rgba(43,38,33,0.15);
+}
+.piece::after {
+  content: "";
+  position: absolute; width: 12px; height: 12px; border-radius: 9999px;
+  background: inherit; top: -6px; left: 11px;
+}
+.piece.dragging {
+  box-shadow: 0 8px 16px rgba(43,38,33,0.28);
+  outline: 2px solid rgba(166,117,24,0.35);
+  outline-offset: 2px;
+}
+
+/* Îlot */
+.ilot {
+  position: absolute;
+  width: 110px; height: 74px;
+  border: 2px dashed #A67518;
+  border-radius: 8px;
+  background: rgba(166,117,24,0.05);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 3px;
+  padding: 6px;
+}
+.ilot .p { background: linear-gradient(135deg, #e2b183, #cf9563); border-radius: 4px; }
+.ilot-chip {
+  position: absolute; top: -10px; right: -10px;
+  width: 22px; height: 22px; border-radius: 9999px;
+  background: #A67518; color: #2B2621; font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #FBF7F1;
+}
+
+/* Recenter button */
+.recenter {
+  position: absolute; bottom: 20px; right: 20px;
+  width: 48px; height: 48px; border-radius: 9999px;
+  background: #FFFDF9; border: 1px solid #E3D6C2;
+  box-shadow: 0 4px 12px rgba(43,38,33,0.18);
+  display: flex; align-items: center; justify-content: center;
+  color: #2B2621; font-size: 18px;
+  z-index: 5;
+}
+.mute {
+  position: absolute; bottom: 20px; right: 78px;
+  width: 40px; height: 40px; border-radius: 9999px;
+  background: #FFFDF9; border: 1px solid #E3D6C2;
+  box-shadow: 0 4px 12px rgba(43,38,33,0.12);
+  display: flex; align-items: center; justify-content: center;
+  color: #6E6153; font-size: 15px;
+  z-index: 5;
+}
+.invite-btn {
+  position: absolute; top: 16px; right: 20px;
+  transform: translateY(46px);
+  background: #A8541F; color: #fff;
+  border: none; border-radius: 8px;
+  padding: 8px 14px; font-size: 13px; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(168,84,31,0.3);
+}
+.caption {
+  padding: 14px 20px; font-size: 12.5px; color: #78716c; background: #fff;
+  border-top: 1px solid #e7e5e4;
+}
+</style>
+</head>
+<body>
+  <div class="browser-frame">
+    <div class="browser-chrome">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <div class="url-bar">jigsaw.app/salon/famille-dupont</div>
+    </div>
+    <div class="canvas">
+      <div class="top-bar">
+        <div class="salon-title">Le Salon de la famille Dupont<div class="sub">1247 pièces · 3 en ligne</div></div>
+        <div class="presence">
+          <div class="avatar">N<span class="dot-online"></span></div>
+          <div class="avatar" style="background:#A67518">M<span class="dot-online"></span></div>
+          <div class="avatar" style="background:#6E6153">+1<span class="dot-online"></span></div>
+          <span class="presence-count">en ligne</span>
+        </div>
+      </div>
+      <button class="invite-btn">Inviter</button>
+
+      <div class="cadre-label">Cadre — 14 / 35 posées</div>
+      <div class="cadre">
+        <div class="slot filled corner-wrong"></div><div class="slot filled"></div><div class="slot filled"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot filled"></div>
+        <div class="slot filled"></div><div class="slot filled"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot filled"></div>
+        <div class="slot filled"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div>
+        <div class="slot filled"></div><div class="slot filled"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot filled"></div>
+        <div class="slot filled"></div><div class="slot filled"></div><div class="slot filled"></div><div class="slot empty"></div><div class="slot empty"></div><div class="slot filled"></div><div class="slot filled"></div>
+      </div>
+
+      <!-- scattered free pieces -->
+      <div class="piece" style="top:180px; left:90px; transform:rotate(-8deg);"></div>
+      <div class="piece" style="top:230px; left:130px; transform:rotate(12deg);"></div>
+      <div class="piece dragging" style="top:340px; left:760px; transform:rotate(4deg);"></div>
+      <div class="piece" style="top:410px; left:200px; transform:rotate(-20deg);"></div>
+      <div class="piece" style="top:120px; left:880px; transform:rotate(30deg);"></div>
+
+      <!-- an Îlot being built, with participant chip for disambiguation -->
+      <div class="ilot" style="top:420px; left:640px;">
+        <div class="ilot-chip">M</div>
+        <div class="p"></div><div class="p"></div><div class="p"></div>
+        <div class="p"></div><div class="p"></div><div class="p"></div>
+      </div>
+
+      <div class="mute" title="Couper le son">🔊</div>
+      <div class="recenter" title="Recentrer la vue sur le Cadre">⌖</div>
+    </div>
+    <div class="caption">Illustre : Component Patterns (Pièce, Îlot, Bouton recentrer, Présence en direct) · State Patterns (Pièce/Îlot en déplacement, Îlots multiples en parallèle) · DESIGN.md Colors/Components. Le chip "M" sur l'Îlot désambiguïse : Mickaela le manipule actuellement. La case en haut à gauche du Cadre (soulignée) illustre une pièce-coin posée au mauvais coin — accrochée par sa forme, pas encore raccordée à ses voisines (cf. PRD FR-6).</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>UX Design Validation: Jigsaw</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>Jigsaw — UX Design Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/ux-designs/ux-jigsaw-2026-07-28/</div>
+      </div>
+    </header>
+
+    <div class="synthesis">
+      <p>La paire de spines est disciplinée et globalement propre : ordre canonique de DESIGN.md respecté, résolution complète des tokens de frontmatter, glossaire et noms d'UJ hérités mot pour mot du PRD, et report honnête des maquettes à l'étape Finalize. Ce n'est cependant pas encore un contrat qu'un consommateur en aval (architecture, dev de stories) peut extraire aveuglément : deux paires de couleurs de la couche de marque calculent en dessous du seuil WCAG AA, environ la moitié des surfaces d'IA n'ont aucune couverture d'état, quelques composants sont à sens unique entre les deux fichiers, et une source citée (l'addendum du brief) n'est déclarée dans le frontmatter d'aucun des deux fichiers.</p>
+      <p>La revue accessibilité confirme et approfondit le problème de contraste (calculs indépendants convergents) et ajoute des manques concrets non liés aux deux arbitrages déjà actés par le porteur de produit (pas d'alternative clavier au drag, pas d'accommodation liée à l'âge) : noms accessibles absents sur les contrôles à icône seule, aucune sémantique de focus/lecteur d'écran sur la modale de tutoriel, et aucun équivalent non-visuel pour les événements collaboratifs en temps réel.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card"><div class="dim-name">Flow coverage</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Token completeness</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">Component coverage</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">State coverage</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">Visual reference coverage</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Bloat &amp; overspecification</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Inheritance discipline</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Shape fit</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>1. Flow coverage</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>UJ-1 et UJ-2 sont toutes deux présentes, nommées mot pour mot, avec étapes numérotées et un temps fort marqué. L'IA note correctement Connexion/Inscription et Statistiques comme volontairement "spine-only".</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">Edge case de UJ-1 non relié depuis le flow</h3><span class="finding-location">EXPERIENCE.md — Key Flows UJ-1</span></header>
+            <div class="finding-note">Le cas où Mickaela repart sans s'inscrire n'est couvert que dans State Patterns ("Sortie sans compte"), sans renvoi depuis le flow lui-même — contrairement à la convention des modèles (ligne <code>Failure:</code> inline).</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une ligne <code>Échec :</code> dans UJ-1 renvoyant vers "Sortie sans compte".</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">LOW</span><h3 class="finding-title">FR-1, FR-3, FR-8, FR-11 jamais explicitement cités</h3><span class="finding-location">EXPERIENCE.md — plusieurs sections</span></header>
+            <div class="finding-note">Couverts fonctionnellement mais sans tag <code>(FR-n)</code>, contrairement à la discipline de citation appliquée ailleurs. FR-11 (persistance) est structurellement porteuse — la liste de Salons d'Accueil en dépend.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter les citations manquantes, en priorité FR-11.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>2. Token completeness</h2><span class="verdict-pill verdict-thin">thin</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Tous les tokens de frontmatter et toutes les références <code>{path.to.token}</code> résolvent. Mais aucun ratio de contraste n'est jamais énoncé pour une palette qui surcharge entièrement les neutres shadcn — exactement le cas "combinaison porteuse" que le spec exige de vérifier.</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">CRITICAL</span><h3 class="finding-title">Contraste non vérifié, et faux en pratique sur deux paires</h3><span class="finding-location">DESIGN.md colors (frontmatter) ; EXPERIENCE.md Accessibility Floor</span></header>
+            <div class="finding-note"><code>primary-foreground</code> (#FFFFFF) sur <code>primary</code> (#C1652F) ≈ 4.06:1, et <code>muted-foreground</code> (#8A7D6C) sur <code>background</code> (#FBF7F1) ≈ 3.76:1 — les deux échouent au seuil AA texte normal (4.5:1), alors qu'EXPERIENCE.md affirme la palette "vérifiée" à ce niveau.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Assombrir <code>primary</code> et/ou <code>muted-foreground</code> jusqu'à passer 4.5:1, ou documenter des ratios vérifiés et restreindre leur usage au texte large/UI.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">LOW</span><h3 class="finding-title"><code>accent-foreground</code> jamais référencé</h3><span class="finding-location">DESIGN.md colors</span></header>
+            <div class="finding-note">Défini en frontmatter mais jamais utilisé via <code>{colors.accent-foreground}</code> dans la prose ou les composants.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Le référencer explicitement ou le retirer.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>3. Component coverage</h2><span class="verdict-pill verdict-thin">thin</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Plusieurs composants n'ont une spécification que d'un seul côté de la paire, et un nom de composant diverge entre les deux fichiers.</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">HIGH</span><h3 class="finding-title">"Historique des contributeurs" sans spec visuelle</h3><span class="finding-location">EXPERIENCE.md Component Patterns ; absent de DESIGN.md.Components</span></header>
+            <div class="finding-note">Spec comportementale complète côté EXPERIENCE.md, mais aucune ligne correspondante dans DESIGN.md — un consommateur n'a aucune forme visuelle à construire.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une ligne DESIGN.md.Components, même minimale si composition shadcn standard.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">"Ligne de classement" sans pendant comportemental</h3><span class="finding-location">DESIGN.md Components ; absent d'EXPERIENCE.md Component Patterns</span></header>
+            <div class="finding-note">Seul le sélecteur de tri est spécifié côté comportement, pas la ligne elle-même (interactivité, animation de re-tri).</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une ligne "Ligne de classement" à EXPERIENCE.md Component Patterns.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">Incohérence de nom : "Point de présence" vs "Présence en direct"</h3><span class="finding-location">DESIGN.md Components ; EXPERIENCE.md Component Patterns</span></header>
+            <div class="finding-note">Décrivent plausiblement la même fonctionnalité à des granularités différentes, mais les noms ne correspondent pas.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Aligner les noms, ou noter explicitement que l'un est l'atome visuel de l'autre.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>4. State coverage</h2><span class="verdict-pill verdict-thin">thin</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Le Salon (Espace infini + Cadre) est très bien couvert (8/8 lignes State Patterns le ciblent). Cinq des sept surfaces d'IA n'ont en revanche aucune ligne.</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">HIGH</span><h3 class="finding-title">Zéro état pour Accueil, Connexion/Inscription, Création de Salon, Partage, Statistiques</h3><span class="finding-location">EXPERIENCE.md — State Patterns (section entière)</span></header>
+            <div class="finding-note">Aucun état vide/chargement/erreur pour ces cinq surfaces — ex. un nouveau Participant inscrit sans Salon, une erreur d'upload en création, etc.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter au minimum une ligne état-vide et une ligne erreur/chargement par surface.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">HIGH</span><h3 class="finding-title">Open Question #3 du PRD non reportée dans la spine</h3><span class="finding-location">PRD §11 Q3 ; EXPERIENCE.md silencieux</span></header>
+            <div class="finding-note">Le PRD flague explicitement l'incohérence résolution image/nombre de pièces comme non résolue ; la spine ne la porte pas, même en <code>[ASSUMPTION]</code>, contrairement à d'autres points ouverts.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une ligne d'état provisoire ou un tag <code>[ASSUMPTION]</code> pour Création de Salon.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>5. Visual reference coverage</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p><code>mockups/</code> et <code>wireframes/</code> n'existent pas encore, <code>imports/</code> est vide — état attendu à ce stade (maquettes générées en Finalize) et correctement signalé dans l'IA. Aucun orphelin, aucune référence imprécise.</p></div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>6. Bloat &amp; overspecification</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Aucune valeur pixel brute là où les tokens s'appliquent, aucune redite de personas/FR/scope, aucune prose décorative sans décision associée.</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">LOW</span><h3 class="finding-title">Léger chevauchement visuel/comportemental</h3><span class="finding-location">DESIGN.md Components (Pièce, Îlot) vs EXPERIENCE.md State Patterns</span></header>
+            <div class="finding-note">Les conditions d'apparition/disparition des contours sont décrites des deux côtés — flou de frontière mineur, pas une contradiction.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Optionnel — clarifier laquelle des deux fait autorité sur le timing.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>7. Inheritance discipline</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Glossaire identique aux deux spines et au PRD, noms d'UJ vérbatim, références de tokens résolues. Deux accrocs mécaniques.</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">Source citée mais non déclarée</h3><span class="finding-location">EXPERIENCE.md Inspiration &amp; Anti-patterns ; frontmatter <code>sources</code> des deux fichiers</span></header>
+            <div class="finding-note">La citation sur le "son de clic non désiré" renvoie à l'addendum du brief, jamais listé dans <code>sources:</code>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter le chemin de l'addendum aux deux frontmatters <code>sources:</code>.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">LOW</span><h3 class="finding-title">Clé de frontmatter divergente : <code>name</code> vs <code>title</code></h3><span class="finding-location">DESIGN.md (<code>name:</code>) ; EXPERIENCE.md (<code>title:</code>)</span></header>
+            <div class="finding-note">Les modèles de référence utilisent <code>name:</code> dans les deux fichiers.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Renommer <code>title</code> → <code>name</code> dans EXPERIENCE.md.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>8. Shape fit</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Ordre canonique de DESIGN.md respecté à la lettre. Toutes les sections requises d'EXPERIENCE.md sont présentes, plus les deux sections déclenchées (Inspiration, Responsive &amp; Platform), bien justifiées.</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">LOW</span><h3 class="finding-title">Ordre Inspiration/Responsive inversé par rapport aux modèles</h3><span class="finding-location">EXPERIENCE.md</span></header>
+            <div class="finding-note">Non normatif — seul l'ordre de DESIGN.md est verrouillé par le spec. Informationnel.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Optionnel.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary><h2>Revue accessibilité</h2><span class="reviewer-source">review-accessibility.md</span></summary>
+        <div class="dim-body"><div class="dim-judgment"><p>Le plancher d'accessibilité affiche de bonnes intentions mais ne tient pas à l'examen : la palette qu'il dit "vérifiée" échoue en réalité sur deux paires porteuses (convergent avec le calcul indépendant de la revue rubrique), et le plancher est silencieux sur plusieurs manques concrets, peu coûteux, et pleinement dans le périmètre déjà accepté (hors alternative clavier au drag et hors accommodations liées à l'âge, tous deux confirmés et non remis en cause).</p></div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">HIGH</span><h3 class="finding-title">Aucun nom accessible sur les contrôles à icône seule</h3><span class="finding-location">DESIGN.md recenter-button ; EXPERIENCE.md Accessibility Floor</span></header>
+            <div class="finding-note">Bouton recentrer et bouton mute n'ont aucune exigence d'<code>aria-label</code> — un utilisateur de lecteur d'écran n'entend rien indiquant leur fonction.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une ligne au plancher exigeant un nom accessible sur tout contrôle à icône seule (testable via la règle axe <code>button-name</code>).</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">HIGH</span><h3 class="finding-title">Modale de tutoriel sans piège de focus ni sémantique lecteur d'écran</h3><span class="finding-location">EXPERIENCE.md Component/State Patterns, Accessibility Floor</span></header>
+            <div class="finding-note">Premier écran vu par tout Invité (FR-9) ; rien ne confirme le piégeage de focus, la fermeture via Échap, ou <code>role="dialog"</code>/<code>aria-modal</code>, même si shadcn Dialog est listé ailleurs comme hérité tel quel.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Confirmer explicitement que la modale utilise shadcn Dialog/Radix (focus trap + Échap + aria-modal inclus), préciser le focus initial et un titre accessible.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">HIGH</span><h3 class="finding-title">Aucun équivalent non-visuel pour les événements collaboratifs temps réel</h3><span class="finding-location">EXPERIENCE.md State/Component Patterns (Intégration au Cadre, Présence en direct)</span></header>
+            <div class="finding-note">Placement de pièce et présence sont spécifiés en visuel + son + vibration, mais rien n'annonce ces événements à un lecteur d'écran (aucune région <code>aria-live</code>) — distinct de l'absence de drag clavier, il s'agit ici d'awareness, pas de manipulation.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une région <code>aria-live="polite"</code> (ou équivalent) annonçant les événements significatifs du Salon, découplée de la mécanique de drag.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">Point de présence et contour d'Îlot : contraste et désambiguïsation multi-utilisateur</h3><span class="finding-location">DESIGN.md presence-dot/ilot-outline ; EXPERIENCE.md ligne 74</span></header>
+            <div class="finding-note">L'or <code>accent</code> sur <code>background</code> n'atteint qu'~2.1:1 (sous le seuil 3:1 pour les éléments graphiques/UI) — un utilisateur malvoyant peut simplement ne pas voir le point ou le contour, surtout sur une photo de puzzle arbitraire en fond. Par ailleurs, plusieurs Îlots actifs en parallèle (FR-7) partagent le même contour, sans différenciation par participant.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Vérifier/ajuster l'or contre un fond chrome opaque garanti pour atteindre 3:1 ; envisager un différenciateur léger par participant (ex. mini-avatar) pour le cas des Îlots concurrents.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">Token <code>ring</code> shadcn jamais re-vérifié contre la nouvelle palette</h3><span class="finding-location">DESIGN.md ligne 70 ; EXPERIENCE.md Accessibility Floor</span></header>
+            <div class="finding-note">Calibré à l'origine contre les gris froids par défaut de shadcn, pas contre le nouveau fond crème — rien ne confirme qu'il garde 3:1 de contraste non-textuel.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Re-vérifier (ou surcharger) <code>ring</code> contre <code>background</code> et <code>card</code>.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">MEDIUM</span><h3 class="finding-title">Critère de taille minimale de cible (WCAG 2.2 SC 2.5.8) absent du plancher</h3><span class="finding-location">EXPERIENCE.md Accessibility Floor</span></header>
+            <div class="finding-note">Critère universel de niveau AA, distinct de l'accommodation liée à l'âge déjà écartée — non mentionné pour les contrôles de chrome (recentrer, mute, inviter).</div>
+            <div class="finding-fix"><strong>Fix:</strong> Ajouter une taille minimale de cible (24×24px CSS) pour les contrôles de chrome hors-canvas ; le canvas lui-même peut invoquer l'exception "essentiel" du critère.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">LOW</span><h3 class="finding-title">Token <code>border</code> quasi invisible contre <code>background</code></h3><span class="finding-location">DESIGN.md colors.border ; recenter-button</span></header>
+            <div class="finding-note">~1.3:1 — le bouton recentrer dépend surtout de son ombre portée pour se distinguer, non vérifié.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Confirmer que l'ombre seule suffit, ou renforcer le contraste de <code>border</code>.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Notes mécaniques</h3>
+      <ul>
+        <li>Glossaire (Salon, Cadre, Espace infini, Îlot, Invité, Participant, Participant inscrit) identique entre les deux spines et le PRD — aucune dérive.</li>
+        <li>Toutes les références <code>{path.to.token}</code> et <code>{components.*}</code> vérifiées résolvent correctement.</li>
+        <li>Incohérence de clé frontmatter : DESIGN.md utilise <code>name:</code>, EXPERIENCE.md utilise <code>title:</code>.</li>
+        <li>Couverture de citation FR forte mais incomplète : FR-1, FR-3, FR-8, FR-11 jamais tagués.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubrique : review-rubric.md</span>
+        <span>Généré : 2026-07-28</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
