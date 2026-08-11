@@ -6,4 +6,4 @@
 --
 -- This migration exists so `supabase/migrations/` is a real, versioned
 -- history from the very first commit rather than an empty directory.
-select 1;
+-- True no-op: no schema statement below, by design.

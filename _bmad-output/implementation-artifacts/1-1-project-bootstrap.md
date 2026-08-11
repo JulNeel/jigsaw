@@ -4,7 +4,7 @@ baseline_commit: NO_VCS
 
 # Story 1.1: Project bootstrap
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -56,6 +56,26 @@ so that later stories can build user-facing features on a consistent foundation 
   - [x] Link the repo to a Vercel project — user-guided (`vercel login` by the user, `vercel link` run by the agent); project `julneels-projects/jigsaw`
   - [x] Define `dev`/`preview`/`production` environment variable groups (Supabase URL/keys, Electric connection info) — all 5 variables set on Production + Preview (3 of 5 also on Development); secrets (`SUPABASE_SECRET_KEY`, `DATABASE_URL`) marked sensitive/write-only, non-secrets left plain; verified via `vercel env ls` (names/metadata only, no values read)
   - [x] Confirm `next build` passes with zero TypeScript errors and the app deploys to a Vercel preview — build + lint + dev-server smoke test verified locally; live deployment verified via `curl` (200 on `/` and `/room/[id]`)
+
+### Review Findings
+
+- [x] [Review][Decision] `accent` token deviates from AC #6's literal list — **resolved, sign-off given, no code change:** DESIGN.md's `accent` (#A67518) stays isolated as `--brand-accent`, deliberately not wired to shadcn's structural `--accent`/`--accent-foreground`, to avoid gold hover/selection chrome across generic components. AC #6's wording is treated as satisfied in spirit (all 9 listed tokens are wired to a DESIGN.md-controlled value; `accent` specifically routes through `--brand-accent` rather than shadcn's `--accent` slot for the reasons documented in Completion Notes).
+- [x] [Review][Defer] ElectricSQL sync engine itself is not provisioned — only the `@tanstack/electric-db-collection` npm package is installed and Postgres logical replication is confirmed reachable via a raw `pg` client; `src/lib/db/collections.ts` has no import of or reference to it. AC #4's "integration point wired" is not fully true yet. Decision made: use **Electric Cloud** (managed — free under 5M writes/month, avoids running a persistent extra service, consistent with this project's "minimize solo-dev operational surface" pattern) — deferred to Epic 3, where real-time sync first becomes load-bearing, to avoid provisioning another account/service before it's needed.
+- [x] [Review][Patch] Root `page.tsx` and `layout.tsx` metadata left as default `create-next-app` boilerplate (Next.js logo, "Deploy Now" links, `title: "Create Next App"`) — inconsistent with the minimal-stub convention the sibling routes establish [src/app/page.tsx, src/app/layout.tsx]
+- [x] [Review][Patch] `shadcn` package is in `dependencies`, but it's a build-time CLI/codegen tool with no runtime import anywhere in the app — belongs in `devDependencies` [package.json]
+- [x] [Review][Patch] `@tanstack/electric-db-collection` uses a caret range (`^0.3.15`) while its tightly-coupled siblings `@tanstack/db`/`@tanstack/react-db` are exact-pinned — pin exact for consistency on a pre-1.0 package family [package.json]
+- [x] [Review][Patch] The "WCAG 2.2 AA vérifiées" frontmatter comment in `globals.css` reads as covering the whole palette, but only ~6 pairs were actually hand-computed (background/foreground, primary/primary-foreground, muted-foreground pairs, ring, brand-accent) — the untouched shadcn defaults (`secondary`, `input`, `chart-*`, `sidebar-*`, `.dark` block) were never verified. Narrow the comment's scope [src/app/globals.css]
+- [x] [Review][Patch] Missing trailing newline at end of file [src/app/globals.css]
+- [x] [Review][Patch] Baseline migration contains a live `select 1;` statement while its own comment describes it as "intentionally empty of domain tables" — make it a true no-op (comment-only) [supabase/migrations/20260809000000_baseline.sql]
+- [x] [Review][Patch] No `engines` field in `package.json` pinning a minimum Node version for Next.js 16 / React 19.2's actual requirements — nothing stops a contributor on an incompatible Node version from hitting a confusing failure [package.json]
+- [x] [Review][Patch] `next/dynamic` import for the Konva smoke test has no `loading` fallback — the route renders nothing while the chunk streams in, with no visible feedback [src/components/canvas/canvas-smoke-test-loader.tsx]
+- [x] [Review][Patch] `--font-sans: var(--font-sans)` is a circular self-reference (compare `--font-mono: var(--font-geist-mono)`, which correctly points at the font loaded in `layout.tsx`) — Geist Sans never actually applies anywhere on the site, silently falling back to the browser default font [src/app/globals.css:10]
+- [x] [Review][Patch] Story file's own File List section lists `next-env.d.ts` as a new tracked file, but `.gitignore` explicitly excludes it — correct the record for audit-trail accuracy [this story file, Dev Agent Record § File List]
+- [x] [Review][Patch] `README.md` still lists npm/yarn/bun as interchangeable alternatives to pnpm, undercutting the "pnpm is the package manager for this project" convention for future contributors [README.md]
+- [x] [Review][Defer] `.dark` block never updates `--brand-accent`, so its contrast against dark backgrounds is unverified [src/app/globals.css] — deferred, dark mode is explicitly out of scope for V1 (DESIGN.md assumption), nothing consumes `.dark` yet
+- [x] [Review][Defer] No code-level guard (e.g. `server-only` import) stops `SUPABASE_SECRET_KEY` from being imported into client code by accident — the network-gateway rejection is the only current protection [no current usage site] — deferred, no file in this diff actually imports the secret key yet; establish the guard convention when the first Server Action does
+- [x] [Review][Defer] No `error.tsx` boundary exists for `room/[id]` (or the other route segments) [src/app/room/[id]/] — deferred, low risk for a static placeholder with no real logic yet
+- [x] [Review][Defer] No CI/automated gate (lint/build/test) enforces any of this going forward — nothing in `.github/` runs on this repo yet — deferred, CI setup is a separate infrastructure decision outside this story's scope
 
 ## Dev Notes
 
@@ -128,7 +148,7 @@ Claude (BMad dev-story session)
 **New:**
 - `package.json` (generated by create-next-app, then renamed to `jigsaw`)
 - `pnpm-lock.yaml`, `pnpm-workspace.yaml`
-- `tsconfig.json`, `next.config.ts`, `next-env.d.ts`, `eslint.config.mjs`, `postcss.config.mjs`
+- `tsconfig.json`, `next.config.ts`, `eslint.config.mjs`, `postcss.config.mjs` (`next-env.d.ts` is generated locally by Next.js and gitignored — not actually tracked)
 - `components.json` (shadcn config)
 - `.gitignore`, `README.md`, `AGENTS.md`, `CLAUDE.md` (framework-generated)
 - `src/app/layout.tsx`, `src/app/page.tsx`, `src/app/favicon.ico`
@@ -146,3 +166,5 @@ Claude (BMad dev-story session)
 **User-created, not tracked in git:** `.env.local` (real Supabase values — filled in by the user directly, never seen by this agent). `.vercel/` (project link metadata — gitignored by default, contains `projectId`/`orgId`, not secret but not meant to be shared across machines).
 
 **External state, not files:** 5 environment variables configured on Vercel (`julneels-projects/jigsaw` project) across Production/Preview/Development scopes; one live deployment at `https://jigsaw-black.vercel.app`.
+
+**Modified during code review (11 patches applied):** `src/app/page.tsx` (rewritten as a minimal stub), `src/app/layout.tsx` (metadata rebranded), `package.json` (`shadcn` moved to devDependencies, `@tanstack/electric-db-collection` pinned exact, `engines.node` added), `pnpm-lock.yaml` (re-synced), `src/app/globals.css` (`--font-sans` self-reference fixed, WCAG comment scope narrowed, trailing newline added), `supabase/migrations/20260809000000_baseline.sql` (removed the stray `select 1;`), `src/components/canvas/canvas-smoke-test-loader.tsx` (added a `loading` fallback), `README.md` (pnpm-only instructions).

@@ -12,5 +12,8 @@ export const CanvasSmokeTest = dynamic(
     import("@/components/canvas/canvas-smoke-test").then(
       (mod) => mod.CanvasSmokeTest,
     ),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <div>Loading canvas…</div>,
+  },
 );
