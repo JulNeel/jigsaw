@@ -29,13 +29,20 @@
     "progressUnavailable": "—",
     "unsupportedFormat": "Format non supporté. Utilisez un JPEG, PNG ou WebP.",
     "invalidFile": "Fichier invalide.",
-    "fileTooLarge": "Fichier trop volumineux (10 Mo maximum)."
+    "fileTooLarge": "Fichier trop volumineux (10 Mo maximum).",
+    "imageReadError": "Impossible de lire cette image. Réessayez avec un autre fichier."
   },
   "Create": {
     "title": "Créer un Salon",
     "lead": "Choisissez une image, puis le nombre de pièces.",
     "imageLabel": "Image du puzzle",
     "uploadButton": "📷 Importer une photo personnelle",
-    "uploadedFile": "Photo sélectionnée : {filename}"
+    "uploadedFile": "Photo sélectionnée : {filename}",
+    "pieceCountLabel": "Nombre de pièces",
+    "pieceCountOption": "{count} pièces",
+    "pieceCountPlaceholder": "Choisissez d'abord une image",
+    "pieceCountLoading": "Chargement de l'image…",
+    "resolutionWarningWithSuggestion": "L'image choisie est trop petite pour {pieceCount} pièces. Essayez plutôt {suggestedCount} pièces, ou choisissez une autre image.",
+    "resolutionWarningNoSuggestion": "L'image choisie est trop petite pour {pieceCount} pièces. Choisissez une autre image."
   }
 }

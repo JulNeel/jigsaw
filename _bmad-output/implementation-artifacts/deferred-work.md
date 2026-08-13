@@ -32,3 +32,8 @@
 
 - No automated test covers `create-room-form.tsx` itself (library selection, `aria-pressed` toggling, upload-rejection preserving prior selection) — only the pure `validateUploadedImage` function is unit-tested. Adding component tests would require introducing React Testing Library/jsdom, a testing-infrastructure decision similar to Story 1.2's Vitest adoption; better addressed deliberately in its own story than pulled in silently during a patch round [src/app/create/create-room-form.tsx]
 - ~~The product's user-facing copy is inconsistently bilingual across already-completed stories~~ — **RESOLVED 2026-08-13**: `next-intl` adopted (fixed `fr` locale, no `[locale]` routing — single-language V1, matching PRD/UX's French-speaking target users). All hardcoded English strings in Sign-in/Sign-up converted to French via `messages/fr.json`. `formatRoomProgress`/`validateUploadedImage` now return translation keys instead of hardcoded text. 33 tests still passing, build/lint clean, verified live via `curl`.
+
+## Deferred from: code review of story-2-3-choose-the-piece-count (2026-08-14)
+
+- No unit test for `get-image-dimensions.ts` — would require mocking the global `createImageBitmap`, not used elsewhere in the test suite; consistent with the already-deferred component-testing-infra gap from Story 2.2's review [src/lib/rooms/get-image-dimensions.ts]
+- `isResolutionSufficient`'s heuristic ignores aspect ratio entirely (a very thin/wide image with enough total pixels would incorrectly pass) — already an explicitly disclosed provisional simplification; revisit once Epic 3's real piece-cutting service exists [src/lib/rooms/is-resolution-sufficient.ts]

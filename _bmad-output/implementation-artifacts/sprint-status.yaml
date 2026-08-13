@@ -58,7 +58,7 @@ development_status:
   epic-2: in-progress
   2-1-gate-room-creation-to-registered-participants: done
   2-2-choose-the-puzzle-image: done
-  2-3-choose-the-piece-count: backlog
+  2-3-choose-the-piece-count: done
   2-4-create-the-room-and-get-a-shareable-invite-link: backlog
   epic-2-retrospective: optional
 
