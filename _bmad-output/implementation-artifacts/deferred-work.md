@@ -23,3 +23,7 @@
 
 - No error boundary (`error.tsx`) or try/catch covers a failure of the Room-list data fetch — premature to build against `getRoomsForUser`'s current stub, which cannot throw; revisit once Epic 2 replaces it with a real (fallible) query [src/app/room-list.tsx]
 - `formatRoomProgress` has no handling for `piecesPlaced > pieceCount`, negative values, or non-integer input — no real data source can produce these yet (stub only returns `[]`); Epic 2's real `Room` table should define these invariants at the DB level rather than requiring speculative UI-side clamping now [src/lib/rooms/format-room-progress.ts]
+
+## Deferred from: code review of story-2-1-gate-room-creation-to-registered-participants (2026-08-13)
+
+- The auth gate has no redirect-back mechanism (`?next=`) — a Guest bounced from a protected route to `/sign-in` loses their original destination. Pre-existing gap since Story 1.4 introduced `requireUser()`; fixing it properly means touching the shared `signIn`/`signUp` Server Actions and both forms across three already-completed stories. Recommend scoping as its own future story (e.g. "Preserve destination through sign-in") rather than folding into whichever story next calls `requireUser()` [src/lib/auth/require-user.ts, src/lib/auth/actions.ts, src/app/sign-in/*]
