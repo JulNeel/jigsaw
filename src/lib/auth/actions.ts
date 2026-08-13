@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/auth/supabase-server";
 import { classifySignUpError } from "@/lib/auth/classify-sign-up-error";
 
@@ -19,12 +20,13 @@ export async function signUp(
   _prevState: SignUpState,
   formData: FormData,
 ): Promise<SignUpState> {
+  const t = await getTranslations("Auth");
   const emailField = formData.get("email");
   const passwordField = formData.get("password");
 
   if (typeof emailField !== "string" || typeof passwordField !== "string") {
     return {
-      error: { field: "general", message: "Invalid form submission." },
+      error: { field: "general", message: t("invalidFormSubmission") },
     };
   }
 
@@ -32,15 +34,15 @@ export async function signUp(
   const password = passwordField;
 
   if (!email) {
-    return { error: { field: "email", message: "Email is required." } };
+    return { error: { field: "email", message: t("emailRequired") } };
   }
   if (!EMAIL_PATTERN.test(email)) {
     return {
-      error: { field: "email", message: "Enter a valid email address." },
+      error: { field: "email", message: t("invalidEmailFormat") },
     };
   }
   if (!password) {
-    return { error: { field: "password", message: "Password is required." } };
+    return { error: { field: "password", message: t("passwordRequired") } };
   }
 
   const supabase = await createClient();
@@ -48,14 +50,20 @@ export async function signUp(
 
   if (error) {
     const field = classifySignUpError(error.message);
-    return { error: { field, message: error.message } };
+    const message =
+      field === "email"
+        ? t("invalidEmailFormat")
+        : field === "password"
+          ? t("passwordRequired")
+          : t("genericError");
+    return { error: { field, message } };
   }
 
   if (!data.session) {
     return {
       error: {
         field: "general",
-        message: "Could not complete sign-up. Please try again.",
+        message: t("signUpIncomplete"),
       },
     };
   }
@@ -69,12 +77,13 @@ export async function signIn(
   _prevState: SignInState,
   formData: FormData,
 ): Promise<SignInState> {
+  const t = await getTranslations("Auth");
   const emailField = formData.get("email");
   const passwordField = formData.get("password");
 
   if (typeof emailField !== "string" || typeof passwordField !== "string") {
     return {
-      error: { field: "general", message: "Invalid form submission." },
+      error: { field: "general", message: t("invalidFormSubmission") },
     };
   }
 
@@ -82,10 +91,10 @@ export async function signIn(
   const password = passwordField;
 
   if (!email) {
-    return { error: { field: "email", message: "Email is required." } };
+    return { error: { field: "email", message: t("emailRequired") } };
   }
   if (!password) {
-    return { error: { field: "password", message: "Password is required." } };
+    return { error: { field: "password", message: t("passwordRequired") } };
   }
 
   const supabase = await createClient();
@@ -103,20 +112,20 @@ export async function signIn(
   if (error) {
     if (error.status === 400) {
       return {
-        error: { field: "general", message: "Invalid email or password." },
+        error: { field: "general", message: t("invalidCredentials") },
       };
     }
     return {
       error: {
         field: "general",
-        message: "Something went wrong. Please try again.",
+        message: t("genericError"),
       },
     };
   }
 
   if (!data.session) {
     return {
-      error: { field: "general", message: "Invalid email or password." },
+      error: { field: "general", message: t("invalidCredentials") },
     };
   }
 

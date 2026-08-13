@@ -27,3 +27,8 @@
 ## Deferred from: code review of story-2-1-gate-room-creation-to-registered-participants (2026-08-13)
 
 - The auth gate has no redirect-back mechanism (`?next=`) — a Guest bounced from a protected route to `/sign-in` loses their original destination. Pre-existing gap since Story 1.4 introduced `requireUser()`; fixing it properly means touching the shared `signIn`/`signUp` Server Actions and both forms across three already-completed stories. Recommend scoping as its own future story (e.g. "Preserve destination through sign-in") rather than folding into whichever story next calls `requireUser()` [src/lib/auth/require-user.ts, src/lib/auth/actions.ts, src/app/sign-in/*]
+
+## Deferred from: code review of story-2-2-choose-the-puzzle-image (2026-08-13)
+
+- No automated test covers `create-room-form.tsx` itself (library selection, `aria-pressed` toggling, upload-rejection preserving prior selection) — only the pure `validateUploadedImage` function is unit-tested. Adding component tests would require introducing React Testing Library/jsdom, a testing-infrastructure decision similar to Story 1.2's Vitest adoption; better addressed deliberately in its own story than pulled in silently during a patch round [src/app/create/create-room-form.tsx]
+- ~~The product's user-facing copy is inconsistently bilingual across already-completed stories~~ — **RESOLVED 2026-08-13**: `next-intl` adopted (fixed `fr` locale, no `[locale]` routing — single-language V1, matching PRD/UX's French-speaking target users). All hardcoded English strings in Sign-in/Sign-up converted to French via `messages/fr.json`. `formatRoomProgress`/`validateUploadedImage` now return translation keys instead of hardcoded text. 33 tests still passing, build/lint clean, verified live via `curl`.

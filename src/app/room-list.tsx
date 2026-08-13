@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { getRoomsForUser } from "@/lib/rooms/get-rooms-for-user";
 import { formatRoomProgress } from "@/lib/rooms/format-room-progress";
 
 export async function RoomList({ userId }: { userId: string }) {
   const rooms = await getRoomsForUser(userId);
+  const tHome = await getTranslations("Home");
+  const tRooms = await getTranslations("Rooms");
 
   if (rooms.length === 0) {
     return (
@@ -11,10 +14,9 @@ export async function RoomList({ userId }: { userId: string }) {
         <span className="text-4xl" aria-hidden="true">
           🧩
         </span>
-        <h2 className="text-lg font-semibold">Aucun Salon pour l&apos;instant</h2>
+        <h2 className="text-lg font-semibold">{tHome("emptyTitle")}</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Créez-en un pour votre famille, ou rejoignez celui d&apos;un proche
-          via un lien.
+          {tHome("emptyBody")}
         </p>
       </div>
     );
@@ -34,10 +36,10 @@ export async function RoomList({ userId }: { userId: string }) {
               <div className="flex flex-1 flex-col">
                 <span className="text-sm font-semibold">{room.name}</span>
                 <span className="text-xs text-muted-foreground">
-                  {formatRoomProgress(room.piecesPlaced, room.pieceCount)}
+                  {formatRoomProgress(room.piecesPlaced, room.pieceCount, tRooms)}
                   {isComplete
-                    ? " · Terminé"
-                    : ` · ${room.onlineCount} en ligne`}
+                    ? ` · ${tHome("roomComplete")}`
+                    : ` · ${tHome("roomOnline", { count: room.onlineCount })}`}
                 </span>
               </div>
             </Link>

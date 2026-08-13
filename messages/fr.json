@@ -1,0 +1,41 @@
+{
+  "Auth": {
+    "emailLabel": "Email",
+    "passwordLabel": "Mot de passe",
+    "emailRequired": "L'email est requis.",
+    "passwordRequired": "Le mot de passe est requis.",
+    "invalidEmailFormat": "Saisissez une adresse email valide.",
+    "invalidFormSubmission": "Formulaire invalide.",
+    "signUpIncomplete": "Impossible de terminer l'inscription. Réessayez.",
+    "invalidCredentials": "Email ou mot de passe invalide.",
+    "genericError": "Une erreur est survenue. Réessayez.",
+    "signUpHeading": "Créer un compte",
+    "signUpSubmit": "Créer un compte",
+    "signUpSubmitPending": "Création du compte…",
+    "signInHeading": "Se connecter",
+    "signInSubmit": "Se connecter",
+    "signInSubmitPending": "Connexion…"
+  },
+  "Home": {
+    "title": "Vos Salons",
+    "createRoom": "Créer un salon",
+    "emptyTitle": "Aucun Salon pour l'instant",
+    "emptyBody": "Créez-en un pour votre famille, ou rejoignez celui d'un proche via un lien.",
+    "roomComplete": "Terminé",
+    "roomOnline": "{count} en ligne"
+  },
+  "Rooms": {
+    "progress": "{piecesPlaced} / {pieceCount} pièces posées",
+    "progressUnavailable": "—",
+    "unsupportedFormat": "Format non supporté. Utilisez un JPEG, PNG ou WebP.",
+    "invalidFile": "Fichier invalide.",
+    "fileTooLarge": "Fichier trop volumineux (10 Mo maximum)."
+  },
+  "Create": {
+    "title": "Créer un Salon",
+    "lead": "Choisissez une image, puis le nombre de pièces.",
+    "imageLabel": "Image du puzzle",
+    "uploadButton": "📷 Importer une photo personnelle",
+    "uploadedFile": "Photo sélectionnée : {filename}"
+  }
+}

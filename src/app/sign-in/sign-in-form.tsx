@@ -1,11 +1,13 @@
 "use client";
 
 import { useActionState } from "react";
+import { useTranslations } from "next-intl";
 import { signIn, type SignInState } from "@/lib/auth/actions";
 
 const initialState: SignInState = {};
 
 export function SignInForm() {
+  const t = useTranslations("Auth");
   const [state, formAction, isPending] = useActionState(
     signIn,
     initialState,
@@ -14,7 +16,7 @@ export function SignInForm() {
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <label htmlFor="sign-in-email">Email</label>
+        <label htmlFor="sign-in-email">{t("emailLabel")}</label>
         <input
           id="sign-in-email"
           name="email"
@@ -34,7 +36,7 @@ export function SignInForm() {
       </div>
 
       <div className="flex flex-col gap-1">
-        <label htmlFor="sign-in-password">Password</label>
+        <label htmlFor="sign-in-password">{t("passwordLabel")}</label>
         <input
           id="sign-in-password"
           name="password"
@@ -60,7 +62,7 @@ export function SignInForm() {
       )}
 
       <button type="submit" disabled={isPending}>
-        {isPending ? "Signing in…" : "Sign in"}
+        {isPending ? t("signInSubmitPending") : t("signInSubmit")}
       </button>
     </form>
   );

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import authMessages from "../../../messages/fr.json";
 
 vi.mock("next/navigation", () => ({
   redirect: vi.fn(() => {
@@ -10,8 +11,19 @@ vi.mock("@/lib/auth/supabase-server", () => ({
   createClient: vi.fn(),
 }));
 
+vi.mock("next-intl/server", () => ({
+  getTranslations: vi.fn(async (namespace: string) => {
+    const dict = (authMessages as Record<string, Record<string, string>>)[
+      namespace
+    ];
+    return (key: string) => dict[key];
+  }),
+}));
+
 import { createClient } from "@/lib/auth/supabase-server";
 import { signIn, signUp } from "./actions";
+
+const t = authMessages.Auth;
 
 function formDataWith(entries: Record<string, FormDataEntryValue>) {
   const formData = new FormData();
@@ -29,7 +41,7 @@ describe("signUp validation", () => {
     );
     expect(result.error).toEqual({
       field: "email",
-      message: "Email is required.",
+      message: t.emailRequired,
     });
   });
 
@@ -40,7 +52,7 @@ describe("signUp validation", () => {
     );
     expect(result.error).toEqual({
       field: "email",
-      message: "Enter a valid email address.",
+      message: t.invalidEmailFormat,
     });
   });
 
@@ -59,7 +71,7 @@ describe("signUp validation", () => {
     );
     expect(result.error).toEqual({
       field: "password",
-      message: "Password is required.",
+      message: t.passwordRequired,
     });
   });
 
@@ -71,7 +83,7 @@ describe("signUp validation", () => {
     const result = await signUp({}, formData);
     expect(result.error).toEqual({
       field: "general",
-      message: "Invalid form submission.",
+      message: t.invalidFormSubmission,
     });
   });
 });
@@ -84,7 +96,7 @@ describe("signIn validation", () => {
     );
     expect(result.error).toEqual({
       field: "email",
-      message: "Email is required.",
+      message: t.emailRequired,
     });
   });
 
@@ -95,7 +107,7 @@ describe("signIn validation", () => {
     );
     expect(result.error).toEqual({
       field: "password",
-      message: "Password is required.",
+      message: t.passwordRequired,
     });
   });
 
@@ -107,7 +119,7 @@ describe("signIn validation", () => {
     const result = await signIn({}, formData);
     expect(result.error).toEqual({
       field: "general",
-      message: "Invalid form submission.",
+      message: t.invalidFormSubmission,
     });
   });
 
@@ -118,7 +130,7 @@ describe("signIn validation", () => {
     );
     expect(result.error).toEqual({
       field: "email",
-      message: "Email is required.",
+      message: t.emailRequired,
     });
   });
 });
@@ -142,7 +154,7 @@ describe("signIn credential-error handling", () => {
 
     expect(result.error).toEqual({
       field: "general",
-      message: "Invalid email or password.",
+      message: t.invalidCredentials,
     });
   });
 
@@ -164,7 +176,7 @@ describe("signIn credential-error handling", () => {
 
     expect(result.error).toEqual({
       field: "general",
-      message: "Something went wrong. Please try again.",
+      message: t.genericError,
     });
   });
 });

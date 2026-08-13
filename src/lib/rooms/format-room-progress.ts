@@ -1,9 +1,15 @@
+type Translate = (
+  key: string,
+  values?: Record<string, string | number | Date>,
+) => string;
+
 export function formatRoomProgress(
   piecesPlaced: number,
   pieceCount: number,
+  t: Translate,
 ): string {
   if (pieceCount <= 0) {
-    return "—";
+    return t("progressUnavailable");
   }
-  return `${piecesPlaced} / ${pieceCount} pièces posées`;
+  return t("progress", { piecesPlaced, pieceCount });
 }
