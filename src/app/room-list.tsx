@@ -1,7 +1,39 @@
 import Link from "next/link";
+import Image from "next/image";
 import { getTranslations } from "next-intl/server";
-import { getRoomsForUser } from "@/lib/rooms/get-rooms-for-user";
+import { getRoomsForUser, type Room } from "@/lib/rooms/get-rooms-for-user";
 import { formatRoomProgress } from "@/lib/rooms/format-room-progress";
+import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
+
+function RoomThumbnail({ room }: { room: Room }) {
+  // Library-sourced Rooms can show their real cover image — it's already a
+  // public static asset, independent of the private piece-tiles bucket.
+  // Uploaded-photo Rooms have no persisted cover image yet (only sliced
+  // tiles, in a private bucket) — falls back to the gradient placeholder
+  // until that's addressed.
+  const libraryImage =
+    room.imageSource === "library"
+      ? LIBRARY_IMAGES.find((entry) => entry.id === room.imageLibraryId)
+      : undefined;
+
+  if (libraryImage) {
+    return (
+      <div className="relative size-13 shrink-0 overflow-hidden rounded-lg">
+        <Image
+          src={libraryImage.src}
+          alt={libraryImage.alt}
+          fill
+          sizes="52px"
+          className="object-cover"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="size-13 shrink-0 rounded-lg bg-gradient-to-br from-primary/40 to-primary/70" />
+  );
+}
 
 export async function RoomList({ userId }: { userId: string }) {
   const rooms = await getRoomsForUser(userId);
@@ -32,7 +64,7 @@ export async function RoomList({ userId }: { userId: string }) {
               href={`/room/${room.inviteSlug}`}
               className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-muted"
             >
-              <div className="size-13 shrink-0 rounded-lg bg-gradient-to-br from-primary/40 to-primary/70" />
+              <RoomThumbnail room={room} />
               <div className="flex flex-1 flex-col">
                 <span className="text-sm font-semibold">{room.name}</span>
                 <span className="text-xs text-muted-foreground">

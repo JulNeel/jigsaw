@@ -8,6 +8,8 @@ export type Room = {
   pieceCount: number;
   piecesPlaced: number;
   onlineCount: number;
+  imageSource: "library" | "upload";
+  imageLibraryId: string | null;
 };
 
 /**
@@ -18,7 +20,7 @@ export type Room = {
  */
 export async function getRoomsForUser(userId: string): Promise<Room[]> {
   const result = await pgPool.query(
-    `select id, name, invite_slug, grid_rows, grid_cols
+    `select id, name, invite_slug, grid_rows, grid_cols, image_source, image_library_id
      from room
      where created_by = $1
      order by created_at desc`,
@@ -32,5 +34,7 @@ export async function getRoomsForUser(userId: string): Promise<Room[]> {
     pieceCount: row.grid_rows * row.grid_cols,
     piecesPlaced: 0,
     onlineCount: 0,
+    imageSource: row.image_source,
+    imageLibraryId: row.image_library_id,
   }));
 }

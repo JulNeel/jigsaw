@@ -48,3 +48,7 @@
 - `room`/`piece`/`piece_adjacency`'s RLS SELECT policies use `using (true)` with no role scoping — would make every Room fully enumerable via PostgREST if the Data API were ever enabled. Verified currently not exploitable (Data API confirmed disabled: `/rest/v1/room?select=*` returns `503 PGRST002`). Revisit if Data API is ever turned on [supabase/migrations/20260814000000_rooms.sql]
 - `pg.Pool` has no configured size/idle-timeout, and dev-only `globalThis` caching gives production a fresh pool per module evaluation with no documented lifecycle — operational tuning, premature for V1 traffic [src/lib/db/pg.ts]
 - No DB-level constraint ties `room.grid_rows * grid_cols` to the actual `piece` row count, nor `piece_adjacency.room_id` to the `room_id` of the pieces it references — enforced only in application code today; would need trigger-level enforcement [supabase/migrations/20260814000000_rooms.sql]
+
+## Deferred: Home thumbnail for upload-sourced Rooms (2026-08-17)
+
+- Home now shows the real cover image for library-sourced Rooms (public static asset, trivial). Rooms created from a personal photo upload still show the gradient placeholder — no whole-image "cover" is persisted anywhere accessible (only sliced tiles exist, in the private `piece-tiles` bucket). Proper fix: upload an additional resized cover image (public or signed-URL-accessible) during Room creation (Story 2.4's pipeline) [src/app/room-list.tsx, src/lib/rooms/actions.ts]
