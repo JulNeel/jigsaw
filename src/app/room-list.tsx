@@ -29,7 +29,7 @@ export async function RoomList({ userId }: { userId: string }) {
         return (
           <li key={room.id}>
             <Link
-              href={`/room/${room.id}`}
+              href={`/room/${room.inviteSlug}`}
               className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-muted"
             >
               <div className="size-13 shrink-0 rounded-lg bg-gradient-to-br from-primary/40 to-primary/70" />
