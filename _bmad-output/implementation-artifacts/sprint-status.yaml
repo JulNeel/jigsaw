@@ -55,11 +55,11 @@ development_status:
   1-4-home: done
   epic-1-retrospective: optional
 
-  epic-2: in-progress
+  epic-2: done
   2-1-gate-room-creation-to-registered-participants: done
   2-2-choose-the-puzzle-image: done
   2-3-choose-the-piece-count: done
-  2-4-create-the-room-and-get-a-shareable-invite-link: backlog
+  2-4-create-the-room-and-get-a-shareable-invite-link: done
   epic-2-retrospective: optional
 
   epic-3: backlog

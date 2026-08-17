@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
 import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
 import { validateUploadedImage } from "@/lib/rooms/validate-uploaded-image";
 import { getImageDimensions } from "@/lib/rooms/get-image-dimensions";
@@ -11,6 +12,13 @@ import {
   isResolutionSufficient,
 } from "@/lib/rooms/is-resolution-sufficient";
 import { PIECE_COUNT_OPTIONS } from "@/lib/rooms/piece-count-options";
+import { computeGridDimensions } from "@/lib/piece-cutting/compute-grid-dimensions";
+import { sliceImageIntoTiles } from "@/lib/piece-cutting/slice-image";
+import { createSeededScatter } from "@/lib/piece-cutting/seeded-scatter";
+import { removePieceTiles, uploadPieceTiles } from "@/lib/rooms/upload-piece-tiles";
+import { createRoom, type CreateRoomPieceInput } from "@/lib/rooms/actions";
+
+type SubmitStage = "idle" | "slicing" | "uploading" | "saving";
 
 type SelectedImage =
   | { kind: "library"; id: string }
@@ -19,9 +27,30 @@ type SelectedImage =
 
 type ImageDimensions = { width: number; height: number } | null;
 
+type SuccessResult = { inviteUrl: string; name: string; pieceCount: number };
+
+const SCATTER_RADIUS_RANGE = { min: 800, max: 2000 };
+
+async function loadImageBitmap(selectedImage: SelectedImage): Promise<ImageBitmap> {
+  if (selectedImage?.kind === "upload") {
+    return createImageBitmap(selectedImage.file);
+  }
+  if (selectedImage?.kind === "library") {
+    const image = LIBRARY_IMAGES.find((entry) => entry.id === selectedImage.id);
+    if (!image) {
+      throw new Error("Unknown library image.");
+    }
+    const response = await fetch(image.src);
+    const blob = await response.blob();
+    return createImageBitmap(blob);
+  }
+  throw new Error("No image selected.");
+}
+
 export function CreateRoomForm() {
   const tCreate = useTranslations("Create");
   const tRooms = useTranslations("Rooms");
+  const [roomName, setRoomName] = useState("");
   const [selectedImage, setSelectedImage] = useState<SelectedImage>(null);
   const [uploadErrorKey, setUploadErrorKey] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<ImageDimensions>(null);
@@ -34,11 +63,22 @@ export function CreateRoomForm() {
   // source of truth for "what did the user last pick" can't drift from a
   // separately-tracked "confirmed" value.
   const [pieceCount, setPieceCount] = useState<number | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStage, setSubmitStage] = useState<SubmitStage>("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successResult, setSuccessResult] = useState<SuccessResult | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const uploadInputId = useId();
   const pieceCountId = useId();
+  const roomNameId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dimensionRequestId = useRef(0);
   const isMountedRef = useRef(true);
+  // React state updates aren't synchronous — checking `isSubmitting` alone
+  // in the click handler left a window for a rapid double-click/double-Enter
+  // to start two submissions before the re-render lands. This ref is the
+  // synchronous source of truth for "a submission is already running".
+  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -64,6 +104,12 @@ export function CreateRoomForm() {
           PIECE_COUNT_OPTIONS,
         )
       : null;
+  const canSubmit =
+    roomName.trim().length > 0 &&
+    selectedImage !== null &&
+    imageDimensions !== null &&
+    isPieceCountValid &&
+    !isSubmitting;
 
   async function handleUploadChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -119,8 +165,177 @@ export function CreateRoomForm() {
     }
   }
 
+  async function handleSubmit() {
+    if (isSubmittingRef.current) {
+      return;
+    }
+    if (!selectedImage || !imageDimensions || pieceCount === null || !canSubmit) {
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    let uploadedTilePaths: string[] = [];
+
+    try {
+      const roomId = crypto.randomUUID();
+      const { rows, cols } = computeGridDimensions(
+        pieceCount,
+        imageDimensions.width / imageDimensions.height,
+      );
+
+      setSubmitStage("slicing");
+      const bitmap = await loadImageBitmap(selectedImage);
+      const tiles = await sliceImageIntoTiles(bitmap, rows, cols);
+
+      setSubmitStage("uploading");
+      const tilePaths = await uploadPieceTiles(roomId, tiles, { rows, cols });
+      uploadedTilePaths = tilePaths;
+
+      const scatterPositions = createSeededScatter(
+        roomId,
+        rows * cols,
+        SCATTER_RADIUS_RANGE,
+      );
+
+      const pieces: CreateRoomPieceInput[] = [];
+      let index = 0;
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          pieces.push({
+            row,
+            col,
+            imageAssetRef: tilePaths[index],
+            scatterX: scatterPositions[index].x,
+            scatterY: scatterPositions[index].y,
+          });
+          index++;
+        }
+      }
+
+      setSubmitStage("saving");
+      const trimmedName = roomName.trim();
+      const result = await createRoom({
+        roomId,
+        name: trimmedName,
+        imageSource: selectedImage.kind,
+        imageLibraryId: selectedImage.kind === "library" ? selectedImage.id : null,
+        pieceCountNominal: pieceCount,
+        grid: { rows, cols },
+        pieces,
+      });
+
+      if (!result.success) {
+        // Room row (and therefore the pieces) were never committed —
+        // don't leave the uploaded tiles behind as permanent orphans.
+        await removePieceTiles(uploadedTilePaths);
+        if (isMountedRef.current) {
+          setSubmitError(result.error.message);
+        }
+        return;
+      }
+
+      if (isMountedRef.current) {
+        setSuccessResult({
+          inviteUrl: result.inviteUrl,
+          name: trimmedName,
+          pieceCount: rows * cols,
+        });
+      }
+    } catch (err) {
+      console.error("Room creation failed:", err);
+      await removePieceTiles(uploadedTilePaths);
+      if (isMountedRef.current) {
+        setSubmitError(tCreate("genericError"));
+      }
+    } finally {
+      isSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+        setSubmitStage("idle");
+      }
+    }
+  }
+
+  async function handleCopyLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+    } catch {
+      // Clipboard API unavailable/denied — link text is still visible and
+      // selectable manually, so this isn't a blocking failure.
+    }
+  }
+
+  if (successResult) {
+    const fullUrl =
+      typeof window !== "undefined"
+        ? `${window.location.origin}${successResult.inviteUrl}`
+        : successResult.inviteUrl;
+    const shareMessage = tCreate("shareMessage", {
+      name: successResult.name,
+      url: fullUrl,
+    });
+
+    return (
+      <div className="flex flex-col gap-4">
+        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent-foreground">
+          {tCreate("successBadge")}
+        </span>
+        <div>
+          <h2 className="text-lg font-semibold">
+            {tCreate("successHeading", { name: successResult.name })}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {tCreate("successLead", { pieceCount: successResult.pieceCount })}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-lg bg-muted p-3">
+          <span className="flex-1 truncate font-mono text-sm">{fullUrl}</span>
+          <Button type="button" onClick={() => handleCopyLink(fullUrl)}>
+            {linkCopied ? tCreate("linkCopied") : tCreate("copyLink")}
+          </Button>
+        </div>
+
+        <div className="flex gap-2">
+          <a
+            className="flex-1 rounded-lg border border-border p-3 text-center text-sm"
+            href={`https://wa.me/?text=${encodeURIComponent(shareMessage)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {tCreate("shareWhatsApp")}
+          </a>
+          <a
+            className="flex-1 rounded-lg border border-border p-3 text-center text-sm"
+            href={`mailto:?body=${encodeURIComponent(shareMessage)}`}
+          >
+            {tCreate("shareEmail")}
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <label htmlFor={roomNameId} className="text-sm font-semibold">
+          {tCreate("roomNameLabel")}
+        </label>
+        <input
+          id={roomNameId}
+          type="text"
+          value={roomName}
+          onChange={(event) => setRoomName(event.target.value)}
+          placeholder={tCreate("roomNamePlaceholder")}
+          className="rounded-lg border border-border bg-background p-2 text-sm"
+        />
+      </div>
+
       <div className="flex flex-col gap-2">
         <label className="text-sm font-semibold">{tCreate("imageLabel")}</label>
 
@@ -229,6 +444,16 @@ export function CreateRoomForm() {
           </p>
         )}
       </div>
+
+      {submitError && (
+        <p role="alert" className="text-sm text-destructive">
+          {submitError}
+        </p>
+      )}
+
+      <Button type="button" disabled={!canSubmit} onClick={handleSubmit}>
+        {isSubmitting ? tCreate(`submitPending_${submitStage}`) : tCreate("submit")}
+      </Button>
     </div>
   );
 }

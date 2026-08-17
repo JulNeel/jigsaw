@@ -37,3 +37,14 @@
 
 - No unit test for `get-image-dimensions.ts` — would require mocking the global `createImageBitmap`, not used elsewhere in the test suite; consistent with the already-deferred component-testing-infra gap from Story 2.2's review [src/lib/rooms/get-image-dimensions.ts]
 - `isResolutionSufficient`'s heuristic ignores aspect ratio entirely (a very thin/wide image with enough total pixels would incorrectly pass) — already an explicitly disclosed provisional simplification; revisit once Epic 3's real piece-cutting service exists [src/lib/rooms/is-resolution-sufficient.ts]
+
+## Forward reference noted during story-2-4 creation (2026-08-14)
+
+- Unauthenticated (Guest) read access to `piece-tiles` Storage objects is unsolved — the bucket is private, and Story 2.4 only sets up authenticated INSERT access for the Participant creating the Room. Epic 3 (where Guests first need to actually see tile images) will need to solve this (a Storage read policy, or signed URLs) [supabase Storage: piece-tiles bucket policies]
+
+## Deferred from: code review of story-2-4-create-the-room-and-get-a-shareable-invite-link (2026-08-17)
+
+- The `piece-tiles` Storage upload policy has no per-room ownership scoping (`bucket_id = 'piece-tiles'` only) — any authenticated user can write to any room's folder if they know/guess its UUID. Not currently exploitable (no page exposes another Room's raw UUID yet), but a real gap once Epic 3 builds Guest-facing pages. Fix requires a two-phase Room-creation flow (create the `room` row first so the Storage policy can check `created_by = auth.uid()`) or per-object ownership metadata — a genuine architecture decision [supabase/migrations/20260814000000_rooms.sql]
+- `room`/`piece`/`piece_adjacency`'s RLS SELECT policies use `using (true)` with no role scoping — would make every Room fully enumerable via PostgREST if the Data API were ever enabled. Verified currently not exploitable (Data API confirmed disabled: `/rest/v1/room?select=*` returns `503 PGRST002`). Revisit if Data API is ever turned on [supabase/migrations/20260814000000_rooms.sql]
+- `pg.Pool` has no configured size/idle-timeout, and dev-only `globalThis` caching gives production a fresh pool per module evaluation with no documented lifecycle — operational tuning, premature for V1 traffic [src/lib/db/pg.ts]
+- No DB-level constraint ties `room.grid_rows * grid_cols` to the actual `piece` row count, nor `piece_adjacency.room_id` to the `room_id` of the pieces it references — enforced only in application code today; would need trigger-level enforcement [supabase/migrations/20260814000000_rooms.sql]

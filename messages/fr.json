@@ -43,6 +43,24 @@
     "pieceCountPlaceholder": "Choisissez d'abord une image",
     "pieceCountLoading": "Chargement de l'image…",
     "resolutionWarningWithSuggestion": "L'image choisie est trop petite pour {pieceCount} pièces. Essayez plutôt {suggestedCount} pièces, ou choisissez une autre image.",
-    "resolutionWarningNoSuggestion": "L'image choisie est trop petite pour {pieceCount} pièces. Choisissez une autre image."
+    "resolutionWarningNoSuggestion": "L'image choisie est trop petite pour {pieceCount} pièces. Choisissez une autre image.",
+    "roomNameLabel": "Nom du salon",
+    "roomNamePlaceholder": "Le Salon de la famille Dupont",
+    "roomNameRequired": "Donnez un nom à votre salon.",
+    "notSignedIn": "Vous devez être connecté pour créer un salon.",
+    "genericError": "Une erreur est survenue. Réessayez.",
+    "submit": "Générer le lien d'invitation",
+    "submitPending_idle": "Création du salon…",
+    "submitPending_slicing": "Découpe de l'image…",
+    "submitPending_uploading": "Envoi des pièces…",
+    "submitPending_saving": "Création du salon…",
+    "successBadge": "✓ Salon créé",
+    "successHeading": "{name} est prêt",
+    "successLead": "{pieceCount} pièces · partagez le lien pour que les vôtres rejoignent.",
+    "copyLink": "Copier",
+    "linkCopied": "Copié !",
+    "shareWhatsApp": "💬 WhatsApp",
+    "shareEmail": "✉️ E-mail",
+    "shareMessage": "Rejoins mon Salon de puzzle « {name} » : {url}"
   }
 }
