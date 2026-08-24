@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import type { RoomDetail, RoomDetailPiece } from "@/lib/rooms/get-room-by-slug";
 
@@ -98,7 +98,29 @@ function PieceSprite({
   );
 }
 
-export function RoomCanvas({ room }: { room: RoomDetail }) {
+export function RoomCanvas({
+  room,
+  onReady,
+}: {
+  room: RoomDetail;
+  onReady?: () => void;
+}) {
+  // Fires once, on mount — past the dynamic import's own "Loading canvas…"
+  // placeholder. AC #1 of Story 3.2 gates the first-access tutorial on
+  // this, not on every individual piece tile finishing its own load (Story
+  // 3.1 deliberately treats those as progressive/best-effort, not a
+  // blocking "canvas readiness" signal). `firedRef` guards against calling
+  // `onReady` more than once if its identity changes across re-renders
+  // (e.g. an inline arrow function from the parent) without needing to
+  // read/write a ref during render (only inside the effect itself).
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (!firedRef.current) {
+      firedRef.current = true;
+      onReady?.();
+    }
+  }, [onReady]);
+
   const frameWidth = room.gridCols * room.tileWidth;
   const frameHeight = room.gridRows * room.tileHeight;
 

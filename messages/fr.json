@@ -70,5 +70,20 @@
     "notFoundBody": "Ce lien d'invitation est invalide ou a expiré. Vérifiez qu'il est correct, ou demandez-en un nouveau à la personne qui vous l'a envoyé.",
     "errorTitle": "Une erreur est survenue",
     "errorBody": "Impossible de charger ce Salon pour le moment. Réessayez dans quelques instants."
+  },
+  "Tutorial": {
+    "title": "Bienvenue dans le Salon",
+    "subtitle": "Quatre gestes pour commencer à contribuer",
+    "step1Title": "Déplacer une pièce",
+    "step1Description": "Glissez-la où vous voulez dans l'espace",
+    "step2Title": "Pivoter une pièce",
+    "step2Description": "Double-tapez pour la faire tourner",
+    "step3Title": "La positionner dans le Cadre",
+    "step3Description": "Elle s'accroche seule si elle correspond",
+    "step4Title": "Créer un Îlot",
+    "step4Description": "Rapprochez deux pièces compatibles pour les assembler",
+    "start": "Commencer",
+    "later": "Plus tard",
+    "closeAriaLabel": "Fermer le tutoriel"
   }
 }

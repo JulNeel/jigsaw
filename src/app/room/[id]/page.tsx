@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { getRoomBySlug, type RoomDetail } from "@/lib/rooms/get-room-by-slug";
-import { RoomCanvasClient } from "@/components/canvas/room-canvas-loader";
+import { RoomView } from "@/components/room/room-view";
+import { createClient } from "@/lib/auth/supabase-server";
 
 // No auth gate here, intentionally — this is the one route every prior
 // story's "gate behind sign-in" pattern deliberately does not apply to.
@@ -35,10 +36,31 @@ export default async function RoomPage({
     );
   }
 
+  // Informational only — never a gate (Story 3.1 AC #1: this route must
+  // never redirect an unauthenticated visitor away). A failure here (auth
+  // service unreachable, env misconfigured) must not crash the route either
+  // — falling back to "treat as Guest" is the safe direction: worst case an
+  // already-signed-in Participant sees an extra tutorial modal once, which
+  // is far better than the zero-friction Guest entry point going down.
+  let isGuest = true;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+    if (error) {
+      console.warn("RoomPage: auth.getUser() returned an error:", error);
+    }
+    isGuest = !user;
+  } catch (err) {
+    console.warn("RoomPage: auth check failed, treating visitor as Guest:", err);
+  }
+
   return (
     <div className="flex flex-col items-center gap-4 p-6">
       <h1 className="text-xl font-semibold">{room.name}</h1>
-      <RoomCanvasClient room={room} />
+      <RoomView room={room} roomSlug={slug} isGuest={isGuest} />
     </div>
   );
 }

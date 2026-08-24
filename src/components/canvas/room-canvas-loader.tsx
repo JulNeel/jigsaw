@@ -8,7 +8,7 @@ import type { RoomDetail } from "@/lib/rooms/get-room-by-slug";
  * inside a Client Component in Next.js 16, same constraint that shaped the
  * Story 1.1 smoke-test loader this supersedes on `/room/[id]`.
  */
-export const RoomCanvasClient = dynamic<{ room: RoomDetail }>(
+export const RoomCanvasClient = dynamic<{ room: RoomDetail; onReady?: () => void }>(
   () => import("@/components/canvas/room-canvas").then((mod) => mod.RoomCanvas),
   {
     ssr: false,
