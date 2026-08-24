@@ -58,8 +58,10 @@ export default async function RoomPage({
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 p-6">
-      <h1 className="text-xl font-semibold">{room.name}</h1>
+    <div className="relative h-dvh w-full overflow-hidden">
+      <h1 className="pointer-events-none absolute top-4 left-4 z-10 rounded-md bg-background/80 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
+        {room.name}
+      </h1>
       <RoomView room={room} roomSlug={slug} isGuest={isGuest} />
     </div>
   );
