@@ -52,3 +52,9 @@
 ## Deferred: Home thumbnail for upload-sourced Rooms (2026-08-17)
 
 - Home now shows the real cover image for library-sourced Rooms (public static asset, trivial). Rooms created from a personal photo upload still show the gradient placeholder — no whole-image "cover" is persisted anywhere accessible (only sliced tiles exist, in the private `piece-tiles` bucket). Proper fix: upload an additional resized cover image (public or signed-URL-accessible) during Room creation (Story 2.4's pipeline) [src/app/room-list.tsx, src/lib/rooms/actions.ts]
+
+## Deferred from: code review of story-3-1-join-a-room-as-a-guest (2026-08-21)
+
+- No rate limiting or enumeration guard on `getRoomBySlug` — a public, unauthenticated, unthrottled lookup by slug. Slug entropy (name + 6-char random suffix) makes brute-forcing impractical today, revisit if abuse becomes real [src/lib/rooms/get-room-by-slug.ts]
+- Signed tile URLs are regenerated on every page load with no caching, even within their 1-hour validity window — premature optimization without real usage/cost data yet [src/lib/rooms/get-room-by-slug.ts]
+- The `storage.objects` SELECT policy scopes only by `bucket_id`, not by the requesting Guest's specific Room/invite-slug — anyone who obtains/guesses one Room's tile path could generate a signed URL for it directly, without ever knowing that Room's invite slug. Mirrors the already-deferred Story 2.4 write-scoping gap; low real-world exploitability today (unguessable UUID-keyed paths), but read and write Storage scoping should likely be resolved together in a dedicated pass [supabase/migrations/20260820000000_room_tile_dimensions.sql]

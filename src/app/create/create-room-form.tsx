@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { startTransition, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -81,6 +81,7 @@ export function CreateRoomForm() {
   const isSubmittingRef = useRef(false);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -165,7 +166,7 @@ export function CreateRoomForm() {
     }
   }
 
-  async function handleSubmit() {
+  function handleSubmit() {
     if (isSubmittingRef.current) {
       return;
     }
@@ -177,86 +178,101 @@ export function CreateRoomForm() {
     setIsSubmitting(true);
     setSubmitError(null);
 
-    let uploadedTilePaths: string[] = [];
+    // The Next.js docs are explicit: a Server Action must be invoked from a
+    // form, or from an event handler wrapped in `startTransition` — calling
+    // it directly from a plain onClick isn't the supported path. Without
+    // this, the automatic RSC re-render/"seeded navigation" Next.js performs
+    // after a Server Action call could race the plain setState calls below
+    // and the success screen would never visibly commit, even though the
+    // Room was genuinely created server-side (the bug reported in testing).
+    startTransition(async () => {
+      let uploadedTilePaths: string[] = [];
 
-    try {
-      const roomId = crypto.randomUUID();
-      const { rows, cols } = computeGridDimensions(
-        pieceCount,
-        imageDimensions.width / imageDimensions.height,
-      );
+      try {
+        const roomId = crypto.randomUUID();
+        const { rows, cols } = computeGridDimensions(
+          pieceCount,
+          imageDimensions.width / imageDimensions.height,
+        );
 
-      setSubmitStage("slicing");
-      const bitmap = await loadImageBitmap(selectedImage);
-      const tiles = await sliceImageIntoTiles(bitmap, rows, cols);
+        setSubmitStage("slicing");
+        const bitmap = await loadImageBitmap(selectedImage);
+        const { tiles, tileWidth, tileHeight } = await sliceImageIntoTiles(
+          bitmap,
+          rows,
+          cols,
+        );
 
-      setSubmitStage("uploading");
-      const tilePaths = await uploadPieceTiles(roomId, tiles, { rows, cols });
-      uploadedTilePaths = tilePaths;
+        setSubmitStage("uploading");
+        const tilePaths = await uploadPieceTiles(roomId, tiles, { rows, cols });
+        uploadedTilePaths = tilePaths;
 
-      const scatterPositions = createSeededScatter(
-        roomId,
-        rows * cols,
-        SCATTER_RADIUS_RANGE,
-      );
+        const scatterPositions = createSeededScatter(
+          roomId,
+          rows * cols,
+          SCATTER_RADIUS_RANGE,
+        );
 
-      const pieces: CreateRoomPieceInput[] = [];
-      let index = 0;
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          pieces.push({
-            row,
-            col,
-            imageAssetRef: tilePaths[index],
-            scatterX: scatterPositions[index].x,
-            scatterY: scatterPositions[index].y,
-          });
-          index++;
+        const pieces: CreateRoomPieceInput[] = [];
+        let index = 0;
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            pieces.push({
+              row,
+              col,
+              imageAssetRef: tilePaths[index],
+              scatterX: scatterPositions[index].x,
+              scatterY: scatterPositions[index].y,
+            });
+            index++;
+          }
         }
-      }
 
-      setSubmitStage("saving");
-      const trimmedName = roomName.trim();
-      const result = await createRoom({
-        roomId,
-        name: trimmedName,
-        imageSource: selectedImage.kind,
-        imageLibraryId: selectedImage.kind === "library" ? selectedImage.id : null,
-        pieceCountNominal: pieceCount,
-        grid: { rows, cols },
-        pieces,
-      });
+        setSubmitStage("saving");
+        const trimmedName = roomName.trim();
+        const result = await createRoom({
+          roomId,
+          name: trimmedName,
+          imageSource: selectedImage.kind,
+          imageLibraryId: selectedImage.kind === "library" ? selectedImage.id : null,
+          pieceCountNominal: pieceCount,
+          grid: { rows, cols },
+          tileWidth,
+          tileHeight,
+          pieces,
+        });
 
-      if (!result.success) {
-        // Room row (and therefore the pieces) were never committed —
-        // don't leave the uploaded tiles behind as permanent orphans.
+        if (!result.success) {
+          // Room row (and therefore the pieces) were never committed —
+          // don't leave the uploaded tiles behind as permanent orphans.
+          await removePieceTiles(uploadedTilePaths);
+          if (isMountedRef.current) {
+            setSubmitError(result.error.message);
+          }
+          return;
+        }
+
+        if (isMountedRef.current) {
+          setSuccessResult({
+            inviteUrl: result.inviteUrl,
+            name: trimmedName,
+            pieceCount: rows * cols,
+          });
+        }
+      } catch (err) {
+        console.error("Room creation failed:", err);
         await removePieceTiles(uploadedTilePaths);
         if (isMountedRef.current) {
-          setSubmitError(result.error.message);
+          setSubmitError(tCreate("genericError"));
         }
-        return;
+      } finally {
+        isSubmittingRef.current = false;
+        if (isMountedRef.current) {
+          setIsSubmitting(false);
+          setSubmitStage("idle");
+        }
       }
-
-      if (isMountedRef.current) {
-        setSuccessResult({
-          inviteUrl: result.inviteUrl,
-          name: trimmedName,
-          pieceCount: rows * cols,
-        });
-      }
-    } catch (err) {
-      console.error("Room creation failed:", err);
-      await removePieceTiles(uploadedTilePaths);
-      if (isMountedRef.current) {
-        setSubmitError(tCreate("genericError"));
-      }
-    } finally {
-      isSubmittingRef.current = false;
-      if (isMountedRef.current) {
-        setIsSubmitting(false);
-        setSubmitStage("idle");
-      }
-    }
+    });
   }
 
   async function handleCopyLink(url: string) {

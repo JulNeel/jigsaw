@@ -7,11 +7,17 @@
  * a real risk for this app's target audience (households sharing links,
  * plausibly iOS-heavy).
  */
+export type SlicedTiles = {
+  tiles: Blob[];
+  tileWidth: number;
+  tileHeight: number;
+};
+
 export async function sliceImageIntoTiles(
   bitmap: ImageBitmap,
   rows: number,
   cols: number,
-): Promise<Blob[]> {
+): Promise<SlicedTiles> {
   const tileWidth = Math.max(1, Math.floor(bitmap.width / cols));
   const tileHeight = Math.max(1, Math.floor(bitmap.height / rows));
   const tiles: Blob[] = [];
@@ -46,5 +52,5 @@ export async function sliceImageIntoTiles(
     }
   }
 
-  return tiles;
+  return { tiles, tileWidth, tileHeight };
 }

@@ -27,6 +27,8 @@ export type CreateRoomInput = {
   imageLibraryId: string | null;
   pieceCountNominal: number;
   grid: { rows: number; cols: number };
+  tileWidth: number;
+  tileHeight: number;
   pieces: CreateRoomPieceInput[];
 };
 
@@ -48,6 +50,14 @@ export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResu
     return { success: false, error: { message: t("roomNameRequired") } };
   }
   if (input.pieces.length !== input.grid.rows * input.grid.cols) {
+    return { success: false, error: { message: t("genericError") } };
+  }
+  if (
+    !Number.isInteger(input.tileWidth) ||
+    input.tileWidth <= 0 ||
+    !Number.isInteger(input.tileHeight) ||
+    input.tileHeight <= 0
+  ) {
     return { success: false, error: { message: t("genericError") } };
   }
 
@@ -73,15 +83,24 @@ export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResu
 
   for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
     const inviteSlug = generateInviteSlug(input.name);
-    const client = await pgPool.connect();
+
+    let client;
+    try {
+      client = await pgPool.connect();
+    } catch (err) {
+      // A connection failure (e.g. a transient network blip) must return a
+      // graceful error, not throw out of the Server Action entirely.
+      console.error("createRoom: pgPool.connect() failed:", err);
+      return { success: false, error: { message: t("genericError") } };
+    }
 
     try {
       await client.query("BEGIN");
 
       await client.query(
         `insert into room
-           (id, name, invite_slug, image_source, image_library_id, piece_count, grid_rows, grid_cols, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+           (id, name, invite_slug, image_source, image_library_id, piece_count, grid_rows, grid_cols, tile_width, tile_height, created_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           input.roomId,
           input.name,
@@ -91,6 +110,8 @@ export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResu
           input.pieceCountNominal,
           input.grid.rows,
           input.grid.cols,
+          input.tileWidth,
+          input.tileHeight,
           auth.user.id,
         ],
       );

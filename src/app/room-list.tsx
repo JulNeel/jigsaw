@@ -36,9 +36,26 @@ function RoomThumbnail({ room }: { room: Room }) {
 }
 
 export async function RoomList({ userId }: { userId: string }) {
-  const rooms = await getRoomsForUser(userId);
   const tHome = await getTranslations("Home");
   const tRooms = await getTranslations("Rooms");
+
+  let rooms: Room[];
+  try {
+    rooms = await getRoomsForUser(userId);
+  } catch (err) {
+    // A connection failure must show a distinct, honest message — silently
+    // falling back to the empty state would misleadingly suggest the user
+    // has no Rooms when the real problem is that they couldn't be loaded.
+    console.error("getRoomsForUser failed:", err);
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <h2 className="text-lg font-semibold">{tHome("loadErrorTitle")}</h2>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          {tHome("loadErrorBody")}
+        </p>
+      </div>
+    );
+  }
 
   if (rooms.length === 0) {
     return (
