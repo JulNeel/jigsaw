@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { clampPosition, clampScale, zoomAtPoint } from "./viewport-bounds";
+import { clampPosition, clampScale, computeFitView, zoomAtPoint } from "./viewport-bounds";
+
+describe("computeFitView", () => {
+  it("fits the smaller viewport dimension against the content span", () => {
+    const view = computeFitView({ width: 800, height: 600 }, 400);
+    expect(view.scale).toBeCloseTo(600 / 400);
+    expect(view.position).toEqual({ x: 400, y: 300 });
+  });
+
+  it("centers on the viewport regardless of aspect ratio", () => {
+    const view = computeFitView({ width: 1200, height: 300 }, 100);
+    expect(view.position).toEqual({ x: 600, y: 150 });
+  });
+
+  it("floors scale at 1 for a degenerate zero-size viewport or content span", () => {
+    expect(computeFitView({ width: 0, height: 0 }, 400).scale).toBeGreaterThanOrEqual(
+      1 / 400,
+    );
+    expect(Number.isFinite(computeFitView({ width: 800, height: 600 }, 0).scale)).toBe(true);
+  });
+});
 
 describe("clampScale", () => {
   it("returns the value unchanged when within bounds", () => {

@@ -1,5 +1,21 @@
 export type Point = { x: number; y: number };
 export type ViewportSize = { width: number; height: number };
+export type FitView = { scale: number; position: Point };
+
+// The "fit everything in view, centered" computation — used both to seed
+// the initial view (`room-canvas.tsx`'s `useState`) and to implement
+// "recenter" (Story 3.4): one formula, called from two places, rather than
+// two independent computations that could silently drift apart. Floored at
+// 1 so a transiently zero-size viewport/content span (hidden tab, zero-size
+// iframe) can never collapse `scale` to 0 — every subsequent zoom
+// computation divides by it.
+export function computeFitView(viewport: ViewportSize, contentSpan: number): FitView {
+  const scale = Math.max(1, Math.min(viewport.width, viewport.height)) / Math.max(1, contentSpan);
+  return {
+    scale,
+    position: { x: viewport.width / 2, y: viewport.height / 2 },
+  };
+}
 
 export function clampScale(scale: number, min: number, max: number): number {
   // A non-finite input (e.g. a NaN pinch-distance ratio from two coincident

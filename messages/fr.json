@@ -85,5 +85,9 @@
     "start": "Commencer",
     "later": "Plus tard",
     "closeAriaLabel": "Fermer le tutoriel"
+  },
+  "Canvas": {
+    "recenterAriaLabel": "Recentrer sur le Cadre",
+    "loading": "Chargement du canevas…"
   }
 }

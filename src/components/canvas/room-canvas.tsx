@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import type Konva from "konva";
 import { Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import type { RoomDetail, RoomDetailPiece } from "@/lib/rooms/get-room-by-slug";
-import { clampPosition, clampScale, zoomAtPoint, type Point } from "./viewport-bounds";
+import { clampPosition, clampScale, computeFitView, zoomAtPoint, type Point } from "./viewport-bounds";
 
 const CONTENT_MARGIN_FACTOR = 1.1;
 // Zoom bounds are relative to each Room's own fit-to-content scale, not an
@@ -117,13 +117,17 @@ function midpointBetween(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
-export function RoomCanvas({
-  room,
-  onReady,
-}: {
+export type RoomCanvasHandle = { recenter: () => void };
+
+export type RoomCanvasProps = {
   room: RoomDetail;
   onReady?: () => void;
-}) {
+  ref?: Ref<RoomCanvasHandle>;
+};
+
+// React 19 accepts `ref` as an ordinary prop on function components — no
+// `forwardRef` needed (that API is legacy now that this project is on 19.2).
+export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
   // Fires once, on mount — past the dynamic import's own "Loading canvas…"
   // placeholder. AC #1 of Story 3.2 gates the first-access tutorial on
   // this, not on every individual piece tile finishing its own load (Story
@@ -187,20 +191,18 @@ export function RoomCanvas({
   }, [room]);
 
   const contentHalfExtent = Math.max(halfExtentX, halfExtentY);
-  const contentSpan = Math.max(1, 2 * contentHalfExtent * CONTENT_MARGIN_FACTOR);
-  // Floored at 1 — a transiently zero-size container (hidden tab, zero-size
-  // iframe) must never make `fitScale` (and therefore `minScale`/`maxScale`)
-  // collapse to 0, which would otherwise turn every subsequent zoom
-  // computation into a division by zero.
-  const fitScale = Math.max(1, Math.min(stageSize.width, stageSize.height)) / contentSpan;
+  const contentSpan = 2 * contentHalfExtent * CONTENT_MARGIN_FACTOR;
+  // `computeFitView` floors both inputs against a transiently zero-size
+  // container (hidden tab, zero-size iframe) so `fitScale` (and therefore
+  // `minScale`/`maxScale`) can never collapse to 0, which would otherwise
+  // turn every subsequent zoom computation into a division by zero.
+  const fitView = computeFitView(stageSize, contentSpan);
+  const fitScale = fitView.scale;
   const minScale = fitScale * MIN_SCALE_FACTOR;
   const maxScale = fitScale * MAX_SCALE_FACTOR;
 
   const [scale, setScale] = useState(fitScale);
-  const [position, setPosition] = useState<Point>({
-    x: stageSize.width / 2,
-    y: stageSize.height / 2,
-  });
+  const [position, setPosition] = useState<Point>(fitView.position);
   const [isDraggable, setIsDraggable] = useState(true);
   const lastPinchDistanceRef = useRef<number | null>(null);
 
@@ -323,8 +325,33 @@ export function RoomCanvas({
     }
     container.addEventListener("touchcancel", handleTouchCancel);
     return () => container.removeEventListener("touchcancel", handleTouchCancel);
-     
+
   }, []);
+
+  // Reuses `fitView` — the exact same `computeFitView` call the initial
+  // `useState` seeds above are computed from — one formula, read twice,
+  // never two independent computations that could drift apart. Also a full
+  // gesture recovery, not just a view reset: `stopDrag()` ends any drag
+  // Konva has in flight (otherwise its own `onDragEnd` would later
+  // overwrite the recentred position with the pre-recenter drag position),
+  // and `handleTouchTransition(0)` clears the pinch baseline and restores
+  // `isDraggable` in case a gesture edge case left it stuck — this button
+  // is the "I'm lost, get me back" escape hatch, so it must also undo any
+  // gesture state a Participant could otherwise be stuck in.
+  useImperativeHandle(
+    ref,
+    () => ({
+      recenter: () => {
+        stageRef.current?.stopDrag();
+        handleTouchTransition(0);
+        setScale(fitView.scale);
+        setPosition(
+          clampPosition(fitView.position, fitView.scale, stageSize, contentHalfExtent, PAN_MARGIN),
+        );
+      },
+    }),
+    [fitView, stageSize, contentHalfExtent],
+  );
 
   return (
     <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
