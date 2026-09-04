@@ -402,7 +402,6 @@ function SoloPieceSprite({
   onDragEnd: () => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
 }) {
-  const isPlaced = piece.placedRow != null;
   const [muted] = useSoundMuted();
   const { x: confirmedX, y: confirmedY } = pieceRenderPosition(
     piece,
@@ -439,6 +438,22 @@ function SoloPieceSprite({
     piece.version <= pendingRestOverride.sinceVersion;
   const x = overridden ? pendingRestOverride.x : confirmedX;
   const y = overridden ? pendingRestOverride.y : confirmedY;
+
+  // Code review fix (2026-09-05, user report: "reglisser et pivoter [freeze]
+  // mais uniquement dans le cadre" — a piece froze, undraggable/unrotatable,
+  // for a few instants after any Frame-slot drop attempt, not just a
+  // successful one). `placedRow`/`placedCol` are set optimistically on
+  // *every* Frame-slot-proximity drop (above), including ones
+  // `predictFrameLock` already expects to be rejected — `isPlaced` used to
+  // read `piece.placedRow != null` directly, so it went `true` the instant
+  // any such drop landed, disabling drag/click via the guards below for the
+  // whole server round-trip, even though `overridden` (the *visual* signal
+  // for this exact "predicted-invalid, resting here for now" window)
+  // already correctly knew better. A piece we're actively resting-in-place
+  // pending a predicted rejection must stay interactive the entire time —
+  // matching its own visual treatment — not just once the rejection
+  // actually arrives.
+  const isPlaced = piece.placedRow != null && !overridden;
 
   // Pieces stay Konva-`draggable` even once placed — that's what makes
   // Konva's own internal "hasDraggingChild" check (Node.js's `_listenDrag`)
