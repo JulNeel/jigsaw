@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-08-08
-last_updated: 2026-08-24
+last_updated: 2026-09-04
 project: jigsaw
 project_key: NOKEY
 tracking_system: file-system
@@ -67,12 +67,14 @@ development_status:
   3-2-first-access-tutorial: done
   3-3-navigate-the-infinite-canvas: done
   3-4-recenter-on-the-frame: done
-  3-5-place-a-piece-into-the-frame-with-real-geometric-validation: backlog
-  3-6-placement-feedback: backlog
-  3-7-celebrate-a-completed-frame: backlog
-  3-8-group-pieces-into-a-cluster: backlog
-  3-9-move-a-cluster-as-a-block: backlog
-  3-10-work-on-multiple-clusters-in-parallel: backlog
+  3-5-place-a-piece-into-the-frame-with-real-geometric-validation: done
+  3-6-placement-feedback: done
+  3-7-celebrate-a-completed-frame: done
+  3-8-group-pieces-into-a-cluster: done
+  3-9-move-a-cluster-as-a-block: done
+  3-10-work-on-multiple-clusters-in-parallel: in-progress
+  3-11-instant-client-side-placement-prediction: done
+  3-12-real-puzzle-piece-cut-shape: done
   epic-3-retrospective: optional
 
   epic-4: backlog

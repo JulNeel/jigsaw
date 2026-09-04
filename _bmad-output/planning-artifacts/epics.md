@@ -420,6 +420,40 @@ So that the Room feels like a real shared table, not a turn-based tool.
 **And** each actively-manipulated Cluster shows the manipulating Participant's avatar chip, so concurrent Clusters stay visually distinguishable
 **And** when two Participants act on the very same Cluster at once, the server resolves the conflict via optimistic concurrency: a stale write is rejected (`STALE_WRITE`), never silently overwritten, and the losing client's optimistic move visibly transitions back to the last confirmed position rather than disappearing (NFR1)
 
+### Story 3.11: Instant client-side placement prediction
+
+As a Participant placing or fusing a piece,
+I want to know immediately and reliably whether my drop worked,
+So that the Frame/Cluster feedback (Story 3.6) never has to snap into place and then bounce back once the server disagrees.
+
+**Acceptance Criteria:**
+
+**Given** a piece (or Cluster) dropped near a Frame slot, or brought into genuine contact with another piece/Cluster
+**When** the client evaluates the drop locally, using the same pure validation logic the Server Action itself uses (`validate-placement`/`validate-fusion`/`validate-overlap`, imported verbatim by both sides — never a separately-maintained client reimplementation) against a `PieceAdjacency` graph now included in the Room's client payload
+**Then** a predicted-valid drop animates directly and confidently into its final position — no optimistic snap followed by a visible bounce-back for the common case
+**And** a predicted-invalid drop (shape/edges don't genuinely match, or nothing to test against yet per the corner-only bootstrap rule) visibly rests exactly at the drop point immediately, without ever snapping toward a slot it was never going to keep
+**And** the server remains the sole and unconditional authority for the actual write in every case (AD-2, NFR6 unchanged) — this story only extends what the client is allowed to *know* ahead of time, never what it's allowed to *decide*
+**And** on the rare occasion the client's prediction was right but a genuine concurrent write beat it to the same slot/edge server-side, the rejection is presented as an in-fiction, factual-but-warm moment (Voice and Tone, UX-DR16 — e.g. "Another Participant placed it just before you"), never a technical error message, and the piece settles at the last confirmed position rather than disappearing (NFR1)
+
+**Note — deliberate, explicit relaxation of NFR6's data-secrecy implication:** NFR6 was written when preventing a client from ever seeing enough to reconstruct the solution was assumed to matter (anti-cheat). Revisited during this story's planning: for this product's family/collaborative context, a Participant reading the network tab to see the adjacency graph is an accepted, non-concerning outcome — a conscious product call, not an oversight. What NFR6 actually protects (the server as sole authority for every write, no client-side bypass of the real validation) is fully preserved; only the *visibility* of the previously server-only `PieceAdjacency` graph changes.
+
+### Story 3.12: Real puzzle-piece cut shape
+
+As a Participant,
+I want each piece to actually look like a cut puzzle piece (tabs and blanks along its edges), not a plain rectangle,
+So that the Room feels like a real jigsaw puzzle, not a sliding-tile grid.
+
+**Acceptance Criteria:**
+
+**Given** the Room's Frame is `rows × cols`
+**When** any piece is rendered anywhere in the Canvas (loose, mid-drag, fused into a Cluster, or locked into the Frame)
+**Then** it displays a tab/blank silhouette on each of its interior edges (a bump protruding outward or a matching notch cut inward), deterministically the same every time the Room is loaded, with every pair of orthogonally-adjacent pieces' shared edge showing complementary shapes (one's tab is the other's blank)
+**And** an edge on the Frame's outer boundary (per `classifyPieceShape`'s existing Corner/Edge/Interior classification) renders flat/straight, never a tab or blank, since there is no neighbor on that side to interlock with
+**And** the piece's rotation (Story 3.5) rotates its tab/blank silhouette together with its image as one rigid shape — a piece that looked correct unrotated still looks like a correctly-cut piece at 90°/180°/270°
+**And** this is a purely cosmetic rendering change: FR6's placement/fusion validation (`PieceShape`, `PieceAdjacency`) is completely unchanged — a piece still locks in or fuses based on the existing grid-position/adjacency rules, never based on the new visual silhouette
+
+**Note — scope decision (2026-09-03), confirmed with the user before this story was written:** implemented as a client-side rendering mask (Konva `clipFunc`) over the *existing* plain rectangular tiles — not a real server-side re-slice of the stored tile images. From a Participant's perspective the two approaches are visually indistinguishable; the mask approach needs no new image-manipulation library (none is installed today, e.g. no `sharp`), no Storage/schema/migration changes, and stays crisp at any zoom level since the silhouette is a vector path recomputed per render rather than a fixed-resolution bitmap. Explicitly supersedes the "future story could reslice with real tab curves" framing in Story 2.4's Dev Notes — re-slicing was the imagined approach at the time, before this trade-off was considered.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events

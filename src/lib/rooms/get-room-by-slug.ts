@@ -7,25 +7,61 @@ import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 const STORAGE_BUCKET = "piece-tiles";
 const SIGNED_URL_EXPIRES_IN_SECONDS = 60 * 60; // 1 hour, arbitrary — revisit if too short/long
 
-// Deliberately does NOT include grid_row/grid_col — that's each piece's
-// exact position in the solved image. Sending it to the client (even
-// unrendered) would be serialized into the page's data and readable via
-// dev tools, handing away the answer before anyone has placed anything.
+// `gridRow`/`gridCol` — each piece's exact position in the solved image —
+// used to be deliberately withheld here (sending it, even unrendered, would
+// serialize the whole solution into the page's data, readable via dev
+// tools). Story 3.11 reverses that: the client now predicts placement/fusion
+// validity locally (reusing the exact same pure validation functions the
+// server runs), which needs each piece's true grid position to work at all.
+// A conscious product call, not an oversight — see Story 3.11's "User-
+// confirmed scope decisions" for the full record — and the data was already
+// reachable regardless: `piece.grid_row`/`grid_col` carries a public
+// `for select using (true)` RLS policy, so a curious client could already
+// query it directly via the Supabase JS SDK before this change.
 export type RoomDetailPiece = {
   id: string;
   shapeType: PieceShapeType;
+  gridRow: number;
+  gridCol: number;
   scatterX: number;
   scatterY: number;
   imageUrl: string | null; // null if the signed URL couldn't be generated
+  rotation: number;
+  placedRow: number | null;
+  placedCol: number | null;
+  version: number;
+  // Story 3.8: which Cluster (if any) this piece is fused into, and its
+  // position *within that Cluster's own local bounding box* — relative to
+  // other fused pieces only, distinct from `gridRow`/`gridCol` above (the
+  // piece's absolute position in the full solved grid).
+  clusterId: string | null;
+  clusterOffsetRow: number | null;
+  clusterOffsetCol: number | null;
 };
 
+// A Cluster row only ever exists while >=2 Pieces are genuinely fused and
+// free-floating (AD-3) — locking a Cluster into the Frame converts every
+// member back into an individually-placed Piece and deletes the row.
+export type RoomDetailCluster = {
+  id: string;
+  anchorX: number;
+  anchorY: number;
+  version: number;
+};
+
+// `id` (the Room's real UUID) is included from Story 3.5 onward — needed
+// client-side to scope the Supabase Realtime subscription
+// (`room_id=eq.<id>`, Architecture AD-1). Not sensitive data the way
+// `grid_row`/`grid_col` is (see RoomDetailPiece's comment above).
 export type RoomDetail = {
+  id: string;
   name: string;
   gridRows: number;
   gridCols: number;
   tileWidth: number;
   tileHeight: number;
   pieces: RoomDetailPiece[];
+  clusters: RoomDetailCluster[];
 };
 
 /**
@@ -50,9 +86,15 @@ export async function getRoomBySlug(slug: string): Promise<RoomDetail | null> {
   }
 
   const pieceResult = await pgPool.query(
-    `select id, shape_type, image_asset_ref, scatter_x, scatter_y
+    `select id, shape_type, grid_row, grid_col, image_asset_ref, scatter_x, scatter_y, rotation, placed_row, placed_col,
+            version, cluster_id, cluster_offset_row, cluster_offset_col
      from piece
      where room_id = $1`,
+    [room.id],
+  );
+
+  const clusterResult = await pgPool.query(
+    `select id, anchor_x, anchor_y, version from cluster where room_id = $1`,
     [room.id],
   );
 
@@ -81,17 +123,35 @@ export async function getRoomBySlug(slug: string): Promise<RoomDetail | null> {
   const pieces: RoomDetailPiece[] = pieceResult.rows.map((row) => ({
     id: row.id,
     shapeType: row.shape_type,
+    gridRow: row.grid_row,
+    gridCol: row.grid_col,
     scatterX: row.scatter_x,
     scatterY: row.scatter_y,
     imageUrl: urlByPath.get(row.image_asset_ref) ?? null,
+    rotation: row.rotation,
+    placedRow: row.placed_row,
+    placedCol: row.placed_col,
+    version: row.version,
+    clusterId: row.cluster_id,
+    clusterOffsetRow: row.cluster_offset_row,
+    clusterOffsetCol: row.cluster_offset_col,
+  }));
+
+  const clusters: RoomDetailCluster[] = clusterResult.rows.map((row) => ({
+    id: row.id,
+    anchorX: row.anchor_x,
+    anchorY: row.anchor_y,
+    version: row.version,
   }));
 
   return {
+    id: room.id,
     name: room.name,
     gridRows: room.grid_rows,
     gridCols: room.grid_cols,
     tileWidth: room.tile_width,
     tileHeight: room.tile_height,
     pieces,
+    clusters,
   };
 }

@@ -14,7 +14,7 @@ import {
 import { PIECE_COUNT_OPTIONS } from "@/lib/rooms/piece-count-options";
 import { computeGridDimensions } from "@/lib/piece-cutting/compute-grid-dimensions";
 import { sliceImageIntoTiles } from "@/lib/piece-cutting/slice-image";
-import { createSeededScatter } from "@/lib/piece-cutting/seeded-scatter";
+import { createSeededRotations, createSeededScatter } from "@/lib/piece-cutting/seeded-scatter";
 import { removePieceTiles, uploadPieceTiles } from "@/lib/rooms/upload-piece-tiles";
 import { createRoom, type CreateRoomPieceInput } from "@/lib/rooms/actions";
 
@@ -28,8 +28,6 @@ type SelectedImage =
 type ImageDimensions = { width: number; height: number } | null;
 
 type SuccessResult = { inviteUrl: string; name: string; pieceCount: number };
-
-const SCATTER_RADIUS_RANGE = { min: 800, max: 2000 };
 
 async function loadImageBitmap(selectedImage: SelectedImage): Promise<ImageBitmap> {
   if (selectedImage?.kind === "upload") {
@@ -210,8 +208,12 @@ export function CreateRoomForm() {
         const scatterPositions = createSeededScatter(
           roomId,
           rows * cols,
-          SCATTER_RADIUS_RANGE,
+          (cols * tileWidth) / 2,
+          (rows * tileHeight) / 2,
+          tileWidth,
+          tileHeight,
         );
+        const rotations = createSeededRotations(roomId, rows * cols);
 
         const pieces: CreateRoomPieceInput[] = [];
         let index = 0;
@@ -223,6 +225,7 @@ export function CreateRoomForm() {
               imageAssetRef: tilePaths[index],
               scatterX: scatterPositions[index].x,
               scatterY: scatterPositions[index].y,
+              rotation: rotations[index],
             });
             index++;
           }

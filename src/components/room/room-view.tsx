@@ -5,6 +5,7 @@ import type { RoomDetail } from "@/lib/rooms/get-room-by-slug";
 import { RoomCanvasClient } from "@/components/canvas/room-canvas-loader";
 import type { RoomCanvasHandle } from "@/components/canvas/room-canvas";
 import { RecenterButton } from "@/components/canvas/recenter-button";
+import { SoundMuteButton } from "@/components/canvas/sound-mute-button";
 import { FirstAccessTutorial } from "@/components/room/first-access-tutorial";
 
 // Coordinates the "once the Canvas loads" part of AC #1 (Story 3.2): the
@@ -32,6 +33,7 @@ export function RoomView({
         onClick={() => canvasRef.current?.recenter()}
         disabled={!canvasReady}
       />
+      <SoundMuteButton />
       {isGuest && <FirstAccessTutorial roomSlug={roomSlug} canvasReady={canvasReady} />}
     </>
   );

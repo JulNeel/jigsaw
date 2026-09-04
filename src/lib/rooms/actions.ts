@@ -11,13 +11,19 @@ import { classifyPieceShape } from "@/lib/piece-cutting/classify-piece-shape";
 // `shapeType` is deliberately NOT part of this payload — it's recomputed
 // server-side (below) from (row, col, grid), the same authoritative
 // treatment already given to adjacency. The client only supplies what it
-// alone knows: which tile file it uploaded where, and where it scattered.
+// alone knows: which tile file it uploaded where, where it scattered, and
+// what random initial orientation it starts in (a piece must be rotated
+// back to 0° before it can ever be tested for Frame placement — Story
+// 3.5's `rotatePiece`/`placePiece` are what re-validate this later; the
+// database's own `rotation in (0, 90, 180, 270)` check constraint is what
+// actually guards this insert against a malformed value, not app code).
 export type CreateRoomPieceInput = {
   row: number;
   col: number;
   imageAssetRef: string;
   scatterX: number;
   scatterY: number;
+  rotation: number;
 };
 
 export type CreateRoomInput = {
@@ -133,7 +139,7 @@ export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResu
           input.grid.cols,
         );
         piecePlaceholders.push(
-          `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`,
+          `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`,
         );
         pieceValues.push(
           pieceId,
@@ -144,11 +150,12 @@ export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResu
           piece.imageAssetRef,
           piece.scatterX,
           piece.scatterY,
+          piece.rotation,
         );
       }
       await client.query(
         `insert into piece
-           (id, room_id, grid_row, grid_col, shape_type, image_asset_ref, scatter_x, scatter_y)
+           (id, room_id, grid_row, grid_col, shape_type, image_asset_ref, scatter_x, scatter_y, rotation)
          values ${piecePlaceholders.join(", ")}`,
         pieceValues,
       );

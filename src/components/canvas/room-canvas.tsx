@@ -1,10 +1,65 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import type Konva from "konva";
-import { Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
-import type { RoomDetail, RoomDetailPiece } from "@/lib/rooms/get-room-by-slug";
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
+import Konva from "konva";
+import { useLiveQuery } from "@tanstack/react-db";
+import { useTranslations } from "next-intl";
+import { toast } from "sonner";
+import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
+import type { RoomDetail, RoomDetailCluster, RoomDetailPiece } from "@/lib/rooms/get-room-by-slug";
+import { createRoomCollections } from "@/lib/db/collections";
+import { markPredictedLock, subscribePlacementConflict } from "@/lib/rooms/placement-conflict-events";
+import {
+  consumeAndCheckInstantPlacementFeedbackShown,
+  markInstantPlacementFeedbackShown,
+  subscribePiecePlaced,
+} from "@/lib/rooms/piece-placement-events";
+import { useSoundMuted } from "@/lib/audio/use-sound-muted";
+import {
+  playSuccessChime,
+  playVictorySound,
+  playWoodClick,
+  SUCCESS_CHIME_STAGGER_SECONDS,
+  warmUpAudioContext,
+} from "@/lib/audio/play-tone";
+import { triggerPlacementHaptic } from "@/lib/audio/haptics";
+import { predictFrameLock } from "@/lib/validation/predict-frame-lock";
+import { predictFusionOutcome } from "@/lib/validation/predict-fusion";
+import { subscribeFrameComplete } from "@/lib/rooms/frame-completion-events";
+import { computePieceEdgeShapes } from "@/lib/piece-cutting/compute-piece-edge-shapes";
+import { buildPieceOutlinePath, drawPieceOutlinePath } from "@/lib/piece-cutting/build-piece-outline-path";
+import { TILE_OVERHANG_FACTOR } from "@/lib/piece-cutting/slice-image";
 import { clampPosition, clampScale, computeFitView, zoomAtPoint, type Point } from "./viewport-bounds";
+
+// Status colors (2026-09-02, user feedback) — a deliberate departure from
+// DESIGN.md's brand palette (terracotta `primary`/gold `accent`, neither of
+// which encode a green/red/orange status vocabulary): green for a genuine
+// validated lock, red for a genuine attempt that was rejected, orange for
+// the specific "would have worked, but something's in the way" case
+// (burying a loose piece), so a Participant can tell *why* at a glance
+// rather than reading every non-success as the same undifferentiated
+// "no." Not in the documented palette — flagged here for a future design
+// pass rather than silently treated as an extension of it.
+const PLACEMENT_PULSE_LOCKED_COLOR = "#2E7D32";
+const PLACEMENT_PULSE_REJECTED_COLOR = "#C62828";
+const PLACEMENT_PULSE_OVERLAP_COLOR = "#EF6C00";
+const PLACEMENT_PULSE_DURATION_SECONDS = 0.32;
+
+// Gold `accent` (DESIGN.md) — reserved specifically for presence/completion
+// moments, never placement (Story 3.6's own pulses are deliberately never
+// this color). A full-Frame glow, not a per-tile pulse, and a longer
+// duration than any placement feedback — this is what makes Story 3.7's
+// celebration "visibly different" (AC #1) at a glance.
+const FRAME_COMPLETION_GLOW_COLOR = "#A67518";
+const FRAME_COMPLETION_GLOW_DURATION_SECONDS = 1.2;
 
 const CONTENT_MARGIN_FACTOR = 1.1;
 // Zoom bounds are relative to each Room's own fit-to-content scale, not an
@@ -61,50 +116,929 @@ function usePieceImage(url: string | null): ImageLoadState {
   return result?.url === url ? result.state : { status: "loading" };
 }
 
+// Where a piece's center should render: its Frame slot (centered-on-origin
+// convention established in Story 3.1) once placed; its Cluster's own
+// free-floating anchor + this piece's offset within it once fused (Story
+// 3.8); otherwise its free-floating scatter/drag position. `clustersById`
+// only ever contains free-floating Clusters (locking into the Frame deletes
+// the Cluster row and converts every member back to `placedRow`/`placedCol`
+// — see Architecture AD-3's amendment) — the three branches are mutually
+// exclusive by construction, never a fallback for a missing lookup.
+function pieceRenderPosition(
+  piece: RoomDetailPiece,
+  clustersById: ReadonlyMap<string, RoomDetailCluster>,
+  frameWidth: number,
+  frameHeight: number,
+  tileWidth: number,
+  tileHeight: number,
+): Point {
+  if (piece.placedRow != null && piece.placedCol != null) {
+    return {
+      x: -frameWidth / 2 + piece.placedCol * tileWidth + tileWidth / 2,
+      y: -frameHeight / 2 + piece.placedRow * tileHeight + tileHeight / 2,
+    };
+  }
+  if (piece.clusterId != null) {
+    const cluster = clustersById.get(piece.clusterId);
+    if (cluster) {
+      return {
+        x: cluster.anchorX + piece.clusterOffsetCol! * tileWidth,
+        y: cluster.anchorY + piece.clusterOffsetRow! * tileHeight,
+      };
+    }
+  }
+  return { x: piece.scatterX, y: piece.scatterY };
+}
+
+// Every not-yet-Frame-anchored piece's current screen position, excluding
+// the piece(s) presently being dragged — exactly the set `placePiece`'s own
+// `overlapsAnyFreePiece` "would this lock bury a loose piece" guard checks
+// server-side (Story 3.11's `predictFrameLock` mirrors that same check
+// client-side).
+function otherFreePiecePositions(
+  pieces: readonly RoomDetailPiece[],
+  excludeIds: ReadonlySet<string>,
+  clustersById: ReadonlyMap<string, RoomDetailCluster>,
+  frameWidth: number,
+  frameHeight: number,
+  tileWidth: number,
+  tileHeight: number,
+): Point[] {
+  return pieces
+    .filter((p) => p.placedRow == null && !excludeIds.has(p.id))
+    .map((p) => pieceRenderPosition(p, clustersById, frameWidth, frameHeight, tileWidth, tileHeight));
+}
+
+// Same free-piece set as `otherFreePiecePositions`, but carrying the extra
+// fields (`gridRow`/`gridCol`/`rotation`) `predictFusionOutcome` needs to
+// tell a genuine contact from a false one — everything else it needs
+// (`findContactCandidates`/`validateFusion`) already only wants a screen
+// position plus those fields.
+function otherFreePieceScreenPositions(
+  pieces: readonly RoomDetailPiece[],
+  excludeIds: ReadonlySet<string>,
+  clustersById: ReadonlyMap<string, RoomDetailCluster>,
+  frameWidth: number,
+  frameHeight: number,
+  tileWidth: number,
+  tileHeight: number,
+): { pieceId: string; gridRow: number; gridCol: number; rotation: number; screenX: number; screenY: number }[] {
+  return pieces
+    .filter((p) => p.placedRow == null && !excludeIds.has(p.id))
+    .map((p) => {
+      const { x, y } = pieceRenderPosition(
+        p,
+        clustersById,
+        frameWidth,
+        frameHeight,
+        tileWidth,
+        tileHeight,
+      );
+      return {
+        pieceId: p.id,
+        gridRow: p.gridRow,
+        gridCol: p.gridCol,
+        rotation: p.rotation,
+        screenX: x,
+        screenY: y,
+      };
+    });
+}
+
+// The proximity threshold from Story 3.5's scope decisions: a drop point
+// snaps to a Frame slot only if it falls within that slot's own half-width/
+// half-height of its center — i.e. closer to that slot than to any
+// neighbor. Returns `null` if the drop isn't close enough to any slot, or
+// falls outside the grid entirely.
+function nearestFrameSlot(
+  point: Point,
+  frameWidth: number,
+  frameHeight: number,
+  tileWidth: number,
+  tileHeight: number,
+  gridRows: number,
+  gridCols: number,
+): { row: number; col: number } | null {
+  const col = Math.round((point.x + frameWidth / 2 - tileWidth / 2) / tileWidth);
+  const row = Math.round((point.y + frameHeight / 2 - tileHeight / 2) / tileHeight);
+  if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) {
+    return null;
+  }
+  const slotCenterX = -frameWidth / 2 + col * tileWidth + tileWidth / 2;
+  const slotCenterY = -frameHeight / 2 + row * tileHeight + tileHeight / 2;
+  const withinThreshold =
+    Math.abs(point.x - slotCenterX) <= tileWidth / 2 &&
+    Math.abs(point.y - slotCenterY) <= tileHeight / 2;
+  return withinThreshold ? { row, col } : null;
+}
+
+type PieceCollection = ReturnType<typeof createRoomCollections>["pieceCollection"];
+
+// Pure rendering — position, drag wiring, and what "placed"/"fused" means
+// are entirely the caller's concern (`SoloPieceSprite` for an unclustered
+// piece, `ClusterGroupSprite` for a fused group). Kept separate because the
+// two callers need materially different drag semantics (Story 3.9: a
+// Cluster drags as one rigid `<Group>`, not piece-by-piece).
 function PieceSprite({
   piece,
+  x,
+  y,
   tileWidth,
   tileHeight,
+  roomId,
+  gridRows,
+  gridCols,
+  draggable,
+  onDragStart,
+  onDragEnd,
+  onClick,
 }: {
   piece: RoomDetailPiece;
+  x: number;
+  y: number;
   tileWidth: number;
   tileHeight: number;
+  roomId: string;
+  gridRows: number;
+  gridCols: number;
+  draggable: boolean;
+  onDragStart?: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd?: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onClick?: () => void;
 }) {
   const imageState = usePieceImage(piece.imageUrl);
-  const x = piece.scatterX - tileWidth / 2;
-  const y = piece.scatterY - tileHeight / 2;
+
+  // Story 3.12: a purely cosmetic tab/blank cut silhouette masked over the
+  // still-plain-rectangular tile image — never consulted by FR6's
+  // placement/fusion validation. Memoized on the piece's fixed grid
+  // position (never changes) rather than recomputed every render; the
+  // `clipFunc` itself still runs once per draw (Konva's own requirement),
+  // but the geometry math behind it doesn't.
+  //
+  // `clipFunc` only exists on Konva's `Container` (Group/Layer) — a `Shape`
+  // (Image/Rect) silently ignores it (code review fix, 2026-09-03: it was
+  // first attached directly to the Image/Rect below and had zero effect).
+  // The piece is therefore now a `<Group>` carrying position/rotation/drag/
+  // click and the clip; its child Image/Rect fills a plain, un-transformed
+  // `0,0`-to-`tileWidth,tileHeight` box. Dragging/clicking on the child
+  // still works exactly as before — it bubbles to the draggable Group,
+  // the same pattern `ClusterGroupSprite` already relies on for its own
+  // members.
+  const clipFunc = useMemo(() => {
+    const edgeShapes = computePieceEdgeShapes(roomId, piece.gridRow, piece.gridCol, gridRows, gridCols);
+    const commands = buildPieceOutlinePath(edgeShapes, tileWidth, tileHeight);
+    return (ctx: Konva.Context) => drawPieceOutlinePath(ctx, commands);
+  }, [roomId, piece.gridRow, piece.gridCol, gridRows, gridCols, tileWidth, tileHeight]);
+
+  const groupProps = {
+    x,
+    y,
+    offsetX: tileWidth / 2,
+    offsetY: tileHeight / 2,
+    rotation: piece.rotation,
+    draggable,
+    onDragStart,
+    onDragEnd,
+    onClick,
+    onTap: onClick,
+    clipFunc,
+  };
 
   if (imageState.status === "loaded") {
+    // Story 3.12 bug fix: a tab's clip protrudes past the piece's own
+    // `tileWidth × tileHeight` box, but `KonvaImage` never paints outside
+    // whatever box it's given — clipping to a region the image doesn't
+    // cover just reveals nothing (transparent), no matter how correct the
+    // clip path is. `sliceImageIntoTiles` (Story 3.12) now bakes real
+    // neighboring-pixel overhang into each *newly created* Room's tile
+    // image; an already-existing Room's tile is still exactly
+    // `tileWidth × tileHeight` pixels, with no overhang at all. Rather than
+    // assume one or the other (and risk stretching an old, unpadded image
+    // into a box sized for a padded one), this reads the actually-loaded
+    // image's own `naturalWidth`/`naturalHeight` — self-describing, so an
+    // old Room's tiles render exactly as before (zero overhang computed),
+    // while a new Room's tiles reveal genuine content under a tab.
+    const overhangX = (imageState.image.naturalWidth - tileWidth) / 2;
+    const overhangY = (imageState.image.naturalHeight - tileHeight) / 2;
     return (
-      <KonvaImage
-        image={imageState.image}
-        x={x}
-        y={y}
-        width={tileWidth}
-        height={tileHeight}
-      />
+      <Group {...groupProps}>
+        <KonvaImage
+          image={imageState.image}
+          x={-overhangX}
+          y={-overhangY}
+          width={imageState.image.naturalWidth}
+          height={imageState.image.naturalHeight}
+        />
+      </Group>
     );
   }
+
+  // No real image to introspect yet (loading) or ever (error) — sized from
+  // the same overhang formula `sliceImageIntoTiles` uses, so a tab bump
+  // still shows the placeholder's flat color instead of a transparent gap
+  // while waiting (AC #6). Only ever an estimate (a still-loading tile
+  // might turn out to have zero real overhang, if it belongs to an old
+  // Room) — harmless for a solid placeholder color, unlike the loaded-image
+  // case above.
+  const placeholderOverhangX = tileWidth * TILE_OVERHANG_FACTOR;
+  const placeholderOverhangY = tileHeight * TILE_OVERHANG_FACTOR;
+  const placeholderProps = {
+    x: -placeholderOverhangX,
+    y: -placeholderOverhangY,
+    width: tileWidth + 2 * placeholderOverhangX,
+    height: tileHeight + 2 * placeholderOverhangY,
+  };
 
   if (imageState.status === "loading") {
     // Distinct from "error" below — a solid, undashed placeholder while the
     // tile is still fetching, so a slow load doesn't look identical to a
     // permanently broken one.
     return (
-      <Rect x={x} y={y} width={tileWidth} height={tileHeight} fill="#eee6da" />
+      <Group {...groupProps}>
+        <Rect fill="#eee6da" {...placeholderProps} />
+      </Group>
     );
   }
 
   // A single broken/missing tile shows a dashed outline instead of crashing
   // the whole Canvas for everyone in the Room.
   return (
-    <Rect
+    <Group {...groupProps}>
+      <Rect stroke="#c4b8a8" dash={[6, 4]} {...placeholderProps} />
+    </Group>
+  );
+}
+
+// An unclustered piece — placed (locked into the Frame, never draggable
+// again) or free-floating (scatter position, fully draggable).
+function SoloPieceSprite({
+  piece,
+  pieces,
+  clustersById,
+  tileWidth,
+  tileHeight,
+  frameWidth,
+  frameHeight,
+  roomId,
+  gridRows,
+  gridCols,
+  collection,
+  onDragStart,
+  onDragEnd,
+  onInstantFrameLockOutcome,
+}: {
+  piece: RoomDetailPiece;
+  pieces: readonly RoomDetailPiece[];
+  clustersById: ReadonlyMap<string, RoomDetailCluster>;
+  tileWidth: number;
+  tileHeight: number;
+  frameWidth: number;
+  frameHeight: number;
+  roomId: string;
+  gridRows: number;
+  gridCols: number;
+  collection: PieceCollection;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
+}) {
+  const isPlaced = piece.placedRow != null;
+  const [muted] = useSoundMuted();
+  const { x: confirmedX, y: confirmedY } = pieceRenderPosition(
+    piece,
+    clustersById,
+    frameWidth,
+    frameHeight,
+    tileWidth,
+    tileHeight,
+  );
+
+  // Story 3.11 code review fix: the Server Action to call must never depend
+  // on the client's own prediction (AC #3/AD-2 — the server decides, the
+  // client only knows ahead of time). `handleDragEnd` below always sets
+  // `placedRow`/`placedCol` when dropped near a slot, exactly as before this
+  // story, so `placePiece` always gets a real chance to lock it in
+  // regardless of what `predictFrameLock` guessed. This local override is
+  // what keeps a *predicted-invalid* drop visually resting at the drop
+  // point in the meantime, instead of prematurely snapping to the slot's
+  // center the way the optimistic `placedRow` value alone would — cleared
+  // once `piece.version` confirms past the value captured at drop time
+  // (same pattern as `ClusterGroupSprite`'s `optimisticAnchor`).
+  const [pendingRestOverride, setPendingRestOverride] = useState<
+    { x: number; y: number; sinceVersion: number } | null
+  >(null);
+  // `piece.placedRow == null` also clears the override immediately — code
+  // review fix (2026-09-02): a hard Server Action failure (e.g. a thrown
+  // `STALE_WRITE`) rolls the *entire* optimistic mutation back, including
+  // `placedRow` itself, without ever bumping `version` — so the version-only
+  // condition alone would leave this override stuck forever in that case,
+  // with nothing left to ever satisfy it.
+  const overridden =
+    pendingRestOverride != null &&
+    piece.placedRow != null &&
+    piece.version <= pendingRestOverride.sinceVersion;
+  const x = overridden ? pendingRestOverride.x : confirmedX;
+  const y = overridden ? pendingRestOverride.y : confirmedY;
+
+  // Pieces stay Konva-`draggable` even once placed — that's what makes
+  // Konva's own internal "hasDraggingChild" check (Node.js's `_listenDrag`)
+  // see this piece as a drag candidate at pointer-down and skip starting
+  // the Stage's own pan-drag for the same gesture. Gating at the
+  // `draggable` attribute instead (placed pieces non-draggable) was the
+  // bug: a non-draggable piece never registers with Konva's drag tracking,
+  // so the pointer-down event bubbles straight to the Stage, which then
+  // has nothing telling it a child is "being dragged" and starts panning
+  // itself — reported as "the whole canvas moves when I move a piece."
+  // Placed pieces instead self-cancel here, before any parent state change,
+  // snapping back to their exact pre-drag position.
+  function handleDragStart(e: Konva.KonvaEventObject<DragEvent>) {
+    if (isPlaced) {
+      e.target.stopDrag();
+      e.target.position({ x, y });
+      return;
+    }
+    // Warms up the shared `AudioContext` for the whole drag's duration
+    // instead of only at drop, when the drop sound is first needed — see
+    // `warmUpAudioContext`'s own comment for why this fixes a perceptible
+    // first-sound lag. Skipped when muted (code review fix, 2026-09-02) —
+    // no sound will play at drop either way, so there's nothing to warm up
+    // for, and a muted Participant's browser shouldn't spin up an
+    // `AudioContext` on every single piece pickup for no audible benefit.
+    if (!muted) {
+      warmUpAudioContext();
+    }
+    onDragStart();
+  }
+
+  function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
+    if (isPlaced) {
+      return;
+    }
+    onDragEnd();
+    const dropPoint = { x: e.target.x(), y: e.target.y() };
+    // Generic "piece released" sound — every drop, anywhere on the Canvas,
+    // in the Frame or not, regardless of whether it also attempts (or
+    // achieves) a genuine match. The success/reject chime below layers on
+    // top of this, only when a match was actually attempted.
+    if (!muted) {
+      playWoodClick();
+    }
+    const slot = nearestFrameSlot(
+      dropPoint,
+      frameWidth,
+      frameHeight,
+      tileWidth,
+      tileHeight,
+      gridRows,
+      gridCols,
+    );
+    if (slot) {
+      // Story 3.11: predict locally, using the exact same pure validation
+      // logic `placePiece` runs server-side, whether this drop will
+      // actually lock in — reliable in the overwhelming common case, since
+      // it's not a guess but a faithful re-run of the server's own rules.
+      // Only ever controls the *optimistic visual* (via `pendingRestOverride`
+      // above) — never whether `placePiece` gets called. `placedRow`/
+      // `placedCol` are always set below when dropped near a slot, exactly
+      // as before this story, so the server always gets a real chance to
+      // lock it in regardless of what was predicted (AC #3/AD-2 — a code
+      // review finding caught an earlier version of this gating the Server
+      // Action choice itself, which would have let a false-negative
+      // prediction silently block a genuinely valid placement).
+      const { outcome } = predictFrameLock({
+        members: [{ pieceId: piece.id, offsetRow: 0, offsetCol: 0 }],
+        anchorTargetRow: slot.row,
+        anchorTargetCol: slot.col,
+        gridRows,
+        gridCols,
+        tileWidth,
+        tileHeight,
+        frameWidth,
+        frameHeight,
+        knownPieces: pieces,
+        otherFreePiecePositions: otherFreePiecePositions(
+          pieces,
+          new Set([piece.id]),
+          clustersById,
+          frameWidth,
+          frameHeight,
+          tileWidth,
+          tileHeight,
+        ),
+      });
+      const predictedLock = outcome === "locked";
+      if (!predictedLock) {
+        setPendingRestOverride({ x: dropPoint.x, y: dropPoint.y, sinceVersion: piece.version });
+      }
+      markPredictedLock(piece.id, predictedLock);
+      // A colored pulse layers on the drop sound for every genuine
+      // validation attempt (green: locked, red: rejected, orange: would
+      // bury a loose piece) — never for `"not-an-attempt"` (AD-3's
+      // physical-puzzle leniency: nothing was actually tested). Only the
+      // "locked" case also gets the success chime; there is deliberately no
+      // reject sound (removed 2026-09-02, user feedback). All of this fires
+      // *instantly* here, not on server confirmation — `markInstantPlacement-
+      // FeedbackShown` (only for `"locked"`, the only outcome with a
+      // confirmed counterpart) tells `RoomCanvas`'s confirmed-event handler
+      // this piece was already covered locally, so every *other* Participant
+      // present (AC #5) still gets it from that confirmed path, without this
+      // client double-firing its own.
+      if (outcome === "locked") {
+        markInstantPlacementFeedbackShown(piece.id);
+        if (!muted) {
+          // Staggered behind the drop sound just above — see
+          // `SUCCESS_CHIME_STAGGER_SECONDS`'s own comment for why an
+          // unstaggered pair reads as one blurred sound, not two.
+          playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+        }
+        const slotCenter = {
+          x: -frameWidth / 2 + slot.col * tileWidth + tileWidth / 2,
+          y: -frameHeight / 2 + slot.row * tileHeight + tileHeight / 2,
+        };
+        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, slotCenter);
+      } else if (outcome === "rejected") {
+        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_REJECTED_COLOR, dropPoint);
+      } else if (outcome === "overlap") {
+        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_OVERLAP_COLOR, dropPoint);
+      }
+      collection.update(piece.id, (draft) => {
+        draft.placedRow = slot.row;
+        draft.placedCol = slot.col;
+        // The raw drop point rides along as the fallback resting position
+        // if locking doesn't validate server-side — a failed placement
+        // attempt rests the piece exactly where it was released, never
+        // bounces it back (see `placePiece`'s Dev Notes).
+        draft.scatterX = dropPoint.x;
+        draft.scatterY = dropPoint.y;
+      });
+    } else {
+      // Not near a Frame slot — still worth checking whether this drop
+      // brought the piece into genuine (or false) contact with another
+      // free piece/Cluster, for the success/reject chime only; the actual
+      // fusion decision is still made exclusively server-side (`movePiece`
+      // → `repositionOrFuse`), this is purely cosmetic prediction, same
+      // spirit as `predictFrameLock`.
+      const fusionOutcome = predictFusionOutcome({
+        draggedMembers: [
+          {
+            pieceId: piece.id,
+            gridRow: piece.gridRow,
+            gridCol: piece.gridCol,
+            rotation: piece.rotation,
+            screenX: dropPoint.x,
+            screenY: dropPoint.y,
+          },
+        ],
+        stationaryMembers: otherFreePieceScreenPositions(
+          pieces,
+          new Set([piece.id]),
+          clustersById,
+          frameWidth,
+          frameHeight,
+          tileWidth,
+          tileHeight,
+        ),
+        tileWidth,
+        tileHeight,
+        knownPieces: pieces,
+      });
+      if (!muted && fusionOutcome === "genuine") {
+        playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+      }
+      collection.update(piece.id, (draft) => {
+        draft.scatterX = dropPoint.x;
+        draft.scatterY = dropPoint.y;
+      });
+    }
+  }
+
+  function handleClick() {
+    if (isPlaced) {
+      return;
+    }
+    // Reads `draft.rotation`, not the closure `piece.rotation` — `draft` is
+    // TanStack DB's live optimistic snapshot, fetched fresh on every
+    // `.update()` call, so it already reflects a still-in-flight prior
+    // rotation from an earlier click this same tick. Using the closure
+    // value here would make two rapid clicks both compute the same target
+    // angle instead of accumulating (code review fix, 2026-09-03 — see
+    // `rotatePiece`'s own comment for the matching server-side half of this
+    // fix).
+    collection.update(piece.id, (draft) => {
+      draft.rotation = (draft.rotation + 90) % 360;
+    });
+  }
+
+  return (
+    <PieceSprite
+      piece={piece}
       x={x}
       y={y}
+      tileWidth={tileWidth}
+      tileHeight={tileHeight}
+      roomId={roomId}
+      gridRows={gridRows}
+      gridCols={gridCols}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onClick={handleClick}
+    />
+  );
+}
+
+// A fused Cluster (Story 3.8/3.9) — every member renders at its own fixed
+// offset inside one draggable `<Group>`, so dragging any member moves the
+// whole group as a single rigid unit via Konva's own grouping, no custom
+// per-frame position-sync code needed. The Group itself carries the drag —
+// individual `PieceSprite`s inside are never draggable — which is exactly
+// what makes Konva's Stage-vs-child drag-conflict safeguard work here too
+// (see `SoloPieceSprite`'s comment): the Group registers as the drag
+// candidate at pointer-down, so the Stage correctly never starts its own
+// pan for the same gesture.
+function ClusterGroupSprite({
+  cluster,
+  members,
+  pieces,
+  clustersById,
+  tileWidth,
+  tileHeight,
+  frameWidth,
+  frameHeight,
+  roomId,
+  gridRows,
+  gridCols,
+  collection,
+  onDragStart,
+  onDragEnd,
+}: {
+  cluster: RoomDetailCluster;
+  members: RoomDetailPiece[];
+  pieces: readonly RoomDetailPiece[];
+  clustersById: ReadonlyMap<string, RoomDetailCluster>;
+  tileWidth: number;
+  tileHeight: number;
+  frameWidth: number;
+  frameHeight: number;
+  roomId: string;
+  gridRows: number;
+  gridCols: number;
+  collection: PieceCollection;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
+  // Any member works as the one reported to the Server Action — its own
+  // math recovers the Cluster's anchor from whichever member's own screen
+  // position it's given, regardless of that member's offset. Bug fixed
+  // here (2026-08-30): this used to assume a member at local offset (0,0)
+  // always exists and treated the Group's own raw position as that
+  // member's position directly — true only for a rectangular Cluster whose
+  // min-row and min-col piece happen to be the same piece. For a larger,
+  // irregularly-shaped Cluster (an L-shape, a cross, anything not a solid
+  // rectangle from its own origin) they're often different pieces, so no
+  // member has offset (0,0) at all; falling back to `members[0]` picked an
+  // arbitrary nonzero offset, and the server's `x - offsetCol*tileWidth`
+  // math then double-subtracted it — every move visibly shifted the whole
+  // Cluster up-left by that arbitrary member's offset (reported: "les
+  // îlots... se redécalent systématiquement vers le haut et la gauche, à
+  // des distances différentes").
+  //
+  // The representative itself must be a *stable* choice, not `members[0]`
+  // — `members`' order follows the live `pieces` array's iteration order,
+  // which isn't guaranteed to stay put across an unrelated Realtime-
+  // triggered re-render while a drag is already in flight. If the
+  // representative changed between drag-start and drag-end, the anchor-
+  // recovery math above would use a mismatched offset, reproducing the
+  // exact bug this comment describes for a different root cause. The
+  // lexicographically lowest piece id is deterministic regardless of array
+  // order.
+  const representativeMember = members.reduce((min, m) => (m.id < min.id ? m : min), members[0]);
+  const [muted] = useSoundMuted();
+
+  // Bridges the gap between "drag-end fires an optimistic mutation" and
+  // "the Realtime-confirmed `cluster` row actually arrives": `<Group>`'s
+  // position is otherwise driven purely by `cluster.anchorX/Y`, which the
+  // optimistic mutation never touches (only the representative piece's own
+  // row changes) — so without this, the whole Cluster visibly snapped back
+  // to its pre-drag position right after release, only correcting once
+  // Realtime confirmed. Cleared implicitly once `cluster.version` moves
+  // past the value captured at drop time — a newer confirmed version means
+  // the real anchor has caught up, so the guess is no longer needed
+  // (computed at render time, not via an effect — no cleanup required).
+  const [optimisticAnchor, setOptimisticAnchor] = useState<
+    | {
+        x: number;
+        y: number;
+        sinceVersion: number;
+        expectedScatterX: number;
+        expectedScatterY: number;
+      }
+    | null
+  >(null);
+  // A rejected write (`STALE_WRITE`) never bumps `cluster.version` at all —
+  // nothing commits server-side — so the version-only guard alone would
+  // leave a losing client's Cluster stuck at its stale optimistic position
+  // forever instead of reverting (code review fix, Story 3.10, 2026-09-04:
+  // same class of bug `SoloPieceSprite`'s `pendingRestOverride` already hit,
+  // fixed there via `piece.placedRow != null` — a field that cleanly
+  // reverts to its pre-attempt state on rollback). Clusters have no
+  // equivalent null/non-null field (`scatterX`/`scatterY` always hold *some*
+  // value), so the equivalent signal here is comparing against the
+  // *specific* value this drag expected: `handleDragEnd` always sets the
+  // representative member's `scatterX`/`scatterY` to `dropPoint` (both
+  // branches below), so on a genuine rollback TanStack DB reverts those
+  // fields back to their pre-drag value, breaking this equality — the
+  // moment to stop trusting `optimisticAnchor`.
+  const anchor =
+    optimisticAnchor &&
+    cluster.version <= optimisticAnchor.sinceVersion &&
+    representativeMember.scatterX === optimisticAnchor.expectedScatterX &&
+    representativeMember.scatterY === optimisticAnchor.expectedScatterY
+      ? optimisticAnchor
+      : { x: cluster.anchorX, y: cluster.anchorY };
+
+  function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
+    onDragEnd();
+    const groupAnchor = { x: e.target.x(), y: e.target.y() };
+    // The representative member's own actual screen position — not the
+    // Group's raw anchor — since that's what the Server Action expects
+    // ("this specific piece's new position") and what correctly recovers
+    // the true anchor on the server regardless of this member's offset.
+    const dropPoint = {
+      x: groupAnchor.x + representativeMember.clusterOffsetCol! * tileWidth,
+      y: groupAnchor.y + representativeMember.clusterOffsetRow! * tileHeight,
+    };
+    setOptimisticAnchor({
+      ...groupAnchor,
+      sinceVersion: cluster.version,
+      expectedScatterX: dropPoint.x,
+      expectedScatterY: dropPoint.y,
+    });
+    // Generic "piece released" sound — every drop, anywhere on the Canvas,
+    // exactly as for a solo piece (`SoloPieceSprite`'s handleDragEnd).
+    if (!muted) {
+      playWoodClick();
+    }
+    const slot = nearestFrameSlot(
+      dropPoint,
+      frameWidth,
+      frameHeight,
+      tileWidth,
+      tileHeight,
+      gridRows,
+      gridCols,
+    );
+    if (slot) {
+      // Unlike a solo piece, a Cluster never needs client-side prediction
+      // to avoid a premature visual snap: this Group only ever renders via
+      // `cluster.anchorX/Y`/`optimisticAnchor` (never via `placedRow`), and
+      // a piece stays classified as a Cluster member (see `RoomCanvas`'s
+      // `membersByClusterId` split) until the real Realtime-confirmed row
+      // arrives with `clusterId: null` — so setting `placedRow` optimistically
+      // here causes no premature slot-snap to correct for. `placedRow`/
+      // `placedCol` are therefore always set below, letting `placePiece`
+      // always get a real chance to lock the whole Cluster in (AC #3/AD-2 —
+      // this must never depend on a client-side guess). The prediction is
+      // still computed, though — code review fix (2026-09-02): without it,
+      // every ordinary rejected Cluster lock (as common as a rejected solo
+      // placement) fired the Story 3.11 "beaten to it" conflict toast, since
+      // that toast's gate has no other way to tell "the client expected this
+      // to work" from "no one expected this to work."
+      const memberIds = new Set(members.map((m) => m.id));
+      const { outcome } = predictFrameLock({
+        members: members.map((m) => ({
+          pieceId: m.id,
+          offsetRow: m.clusterOffsetRow! - representativeMember.clusterOffsetRow!,
+          offsetCol: m.clusterOffsetCol! - representativeMember.clusterOffsetCol!,
+        })),
+        anchorTargetRow: slot.row,
+        anchorTargetCol: slot.col,
+        gridRows,
+        gridCols,
+        tileWidth,
+        tileHeight,
+        frameWidth,
+        frameHeight,
+        knownPieces: pieces,
+        otherFreePiecePositions: otherFreePiecePositions(
+          pieces,
+          memberIds,
+          clustersById,
+          frameWidth,
+          frameHeight,
+          tileWidth,
+          tileHeight,
+        ),
+      });
+      const predictedLock = outcome === "locked";
+      markPredictedLock(representativeMember.id, predictedLock);
+      // Only a genuine validation attempt gets a success chime, and only on
+      // success — see `SoloPieceSprite`'s handleDragEnd. No colored pulse
+      // here (yet) — a Cluster lock-in's own optimistic-feedback gap is a
+      // pre-existing, already-tracked limitation (`deferred-work.md`), not
+      // something this change expands the scope of.
+      if (predictedLock) {
+        // Code review fix (2026-09-02): without this, the representative
+        // member's own confirmed `subscribePiecePlaced` event (which every
+        // member of a locked Cluster eventually gets, one at a time) never
+        // knew this client had already played the chime instantly — it
+        // played a *second* time for the exact piece this whole instant
+        // path was already covering, reopening the double-sound bug this
+        // registry exists to prevent. Every *other* member's own confirmed
+        // event still fires its own chime, unaffected — that per-member
+        // cascade for a multi-piece lock-in is this story's own long-
+        // standing, deliberate design (Task 3: "fires once per newly-placed
+        // piece, not once per Cluster"), not something this fix changes.
+        markInstantPlacementFeedbackShown(representativeMember.id);
+        if (!muted) {
+          playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+        }
+      }
+      collection.update(representativeMember.id, (draft) => {
+        draft.placedRow = slot.row;
+        draft.placedCol = slot.col;
+        // Fallback resting position if locking doesn't validate
+        // server-side — see `SoloPieceSprite`'s handleDragEnd and
+        // `placePiece`'s Dev Notes.
+        draft.scatterX = dropPoint.x;
+        draft.scatterY = dropPoint.y;
+      });
+    } else {
+      // Not near a Frame slot — same cosmetic-only fusion-outcome check as
+      // `SoloPieceSprite`, applied to every member of the Cluster at once.
+      const memberIds = new Set(members.map((m) => m.id));
+      const fusionOutcome = predictFusionOutcome({
+        draggedMembers: members.map((m) => ({
+          pieceId: m.id,
+          gridRow: m.gridRow,
+          gridCol: m.gridCol,
+          rotation: m.rotation,
+          screenX: dropPoint.x + (m.clusterOffsetCol! - representativeMember.clusterOffsetCol!) * tileWidth,
+          screenY: dropPoint.y + (m.clusterOffsetRow! - representativeMember.clusterOffsetRow!) * tileHeight,
+        })),
+        stationaryMembers: otherFreePieceScreenPositions(
+          pieces,
+          memberIds,
+          clustersById,
+          frameWidth,
+          frameHeight,
+          tileWidth,
+          tileHeight,
+        ),
+        tileWidth,
+        tileHeight,
+        knownPieces: pieces,
+      });
+      if (!muted && fusionOutcome === "genuine") {
+        playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+      }
+      collection.update(representativeMember.id, (draft) => {
+        draft.scatterX = dropPoint.x;
+        draft.scatterY = dropPoint.y;
+      });
+    }
+  }
+
+  function handleDragStart() {
+    // Same reasoning as `SoloPieceSprite`'s handleDragStart — warms up the
+    // shared `AudioContext` for the whole drag's duration, not just at drop.
+    // Skipped when muted (code review fix, 2026-09-02) — nothing to warm up
+    // for if no sound will play at drop either way.
+    if (!muted) {
+      warmUpAudioContext();
+    }
+    onDragStart();
+  }
+
+  return (
+    <Group
+      x={anchor.x}
+      y={anchor.y}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      {members.map((piece) => (
+        <PieceSprite
+          key={piece.id}
+          piece={piece}
+          x={piece.clusterOffsetCol! * tileWidth}
+          y={piece.clusterOffsetRow! * tileHeight}
+          tileWidth={tileWidth}
+          tileHeight={tileHeight}
+          roomId={roomId}
+          gridRows={gridRows}
+          gridCols={gridCols}
+          draggable={false}
+        />
+      ))}
+    </Group>
+  );
+}
+
+// A brief scale+fade pulse over a newly-placed piece (Story 3.6, AC #1/#4).
+// Rendered only when `prefers-reduced-motion` doesn't apply — the reduced-
+// motion fallback is simply not rendering this at all, since the piece
+// having snapped into its Frame slot is already the full "state change" AC
+// #4 asks for with no animated transition layered on top. Plays once on
+// mount via a Konva.Tween (Canvas draws pixels, not DOM, so CSS transitions
+// don't apply here) and never needs to be told when it's done — the parent
+// unmounts it via a timeout matched to `PLACEMENT_PULSE_DURATION_SECONDS`.
+function PlacementPulse({
+  x,
+  y,
+  tileWidth,
+  tileHeight,
+  color,
+}: {
+  x: number;
+  y: number;
+  tileWidth: number;
+  tileHeight: number;
+  color: string;
+}) {
+  const rectRef = useRef<Konva.Rect>(null);
+
+  useEffect(() => {
+    const node = rectRef.current;
+    if (!node) {
+      return;
+    }
+    node.opacity(0.55);
+    node.scale({ x: 0.85, y: 0.85 });
+    const tween = new Konva.Tween({
+      node,
+      opacity: 0,
+      scaleX: 1.15,
+      scaleY: 1.15,
+      duration: PLACEMENT_PULSE_DURATION_SECONDS,
+      easing: Konva.Easings.EaseOut,
+    });
+    tween.play();
+    return () => tween.destroy();
+  }, []);
+
+  return (
+    <Rect
+      ref={rectRef}
+      x={x}
+      y={y}
+      offsetX={tileWidth / 2}
+      offsetY={tileHeight / 2}
       width={tileWidth}
       height={tileHeight}
-      stroke="#c4b8a8"
-      dash={[6, 4]}
+      fill={color}
+      listening={false}
+    />
+  );
+}
+
+// A full-Frame gold glow/pulse for Story 3.7's Frame-completion celebration
+// — same `Konva.Tween` scale+fade idiom as `PlacementPulse`, but covering
+// the whole Frame rectangle (not one tile), a different color, and a much
+// longer duration, so it reads as a distinctly bigger moment (AC #1).
+// Rendered only when `prefers-reduced-motion` doesn't apply (checked by the
+// caller at trigger time, same convention as `PlacementPulse`) — the
+// `aria-live` announcement is the fallback "state change" in that case.
+function FrameCompletionGlow({
+  frameWidth,
+  frameHeight,
+}: {
+  frameWidth: number;
+  frameHeight: number;
+}) {
+  const rectRef = useRef<Konva.Rect>(null);
+
+  useEffect(() => {
+    const node = rectRef.current;
+    if (!node) {
+      return;
+    }
+    node.opacity(0.5);
+    node.scale({ x: 0.96, y: 0.96 });
+    const tween = new Konva.Tween({
+      node,
+      opacity: 0,
+      scaleX: 1.06,
+      scaleY: 1.06,
+      duration: FRAME_COMPLETION_GLOW_DURATION_SECONDS,
+      easing: Konva.Easings.EaseOut,
+    });
+    tween.play();
+    return () => tween.destroy();
+  }, []);
+
+  return (
+    <Rect
+      ref={rectRef}
+      x={0}
+      y={0}
+      offsetX={frameWidth / 2}
+      offsetY={frameHeight / 2}
+      width={frameWidth}
+      height={frameHeight}
+      fill={FRAME_COMPLETION_GLOW_COLOR}
+      listening={false}
     />
   );
 }
@@ -144,6 +1078,256 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
     }
   }, [onReady]);
 
+  // One pair of collections per Room, seeded from the Server Component's
+  // static snapshot (Story 3.1) and kept live via Supabase Realtime from
+  // then on (Story 3.5, Architecture AD-1 amended 2026-08-28; Story 3.8
+  // adds the `clusters` collection on the same channel). `initialPieces`/
+  // `initialClusters` are only ever read once at creation — `room.id` is
+  // the only real dependency.
+  const { pieceCollection, clusterCollection } = useMemo(
+    () =>
+      createRoomCollections({
+        roomId: room.id,
+        initialPieces: room.pieces,
+        initialClusters: room.clusters,
+        totalPieceCount: room.gridRows * room.gridCols,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [room.id],
+  );
+  const collection = pieceCollection;
+  const { data: livePieces } = useLiveQuery(
+    (q) => q.from({ pieces: pieceCollection }),
+    [pieceCollection],
+  );
+  const { data: liveClusters } = useLiveQuery(
+    (q) => q.from({ clusters: clusterCollection }),
+    [clusterCollection],
+  );
+  const pieces = livePieces ?? room.pieces;
+  const clusters = liveClusters ?? room.clusters;
+  const clustersById = useMemo(
+    () => new Map(clusters.map((c) => [c.id, c])),
+    [clusters],
+  );
+
+  const { halfExtentX, halfExtentY, frameWidth, frameHeight } = useMemo(() => {
+    const frameWidth = room.gridCols * room.tileWidth;
+    const frameHeight = room.gridRows * room.tileHeight;
+    // Content extent is derived from the Frame size and every piece's real
+    // *current* position (not just its initial scatter, and — Story 3.8 —
+    // not raw `scatterX`/`scatterY` either, stale once a piece is fused
+    // into a Cluster; `pieceRenderPosition` is the one source of truth for
+    // "where is this piece right now") — a piece/Cluster dragged far from
+    // its starting point must still expand the pannable area, or it could
+    // become permanently unreachable (AC #2 of Story 3.3 / NFR-1).
+    const positions = pieces.map((p) =>
+      pieceRenderPosition(p, clustersById, frameWidth, frameHeight, room.tileWidth, room.tileHeight),
+    );
+    return {
+      frameWidth,
+      frameHeight,
+      halfExtentX: Math.max(
+        frameWidth / 2,
+        ...positions.map((pos) => Math.abs(pos.x) + room.tileWidth / 2),
+      ),
+      halfExtentY: Math.max(
+        frameHeight / 2,
+        ...positions.map((pos) => Math.abs(pos.y) + room.tileHeight / 2),
+      ),
+    };
+  }, [room, pieces, clustersById]);
+
+  // Placement feedback (Story 3.6): fires for every Participant present,
+  // regardless of who caused it. Fixed by code review (2026-09-02): the
+  // original version detected "newly placed" by diffing the live `pieces`
+  // snapshot for a `placedRow` transition — but `placedRow` is set
+  // *optimistically*, the instant a drop lands near a slot, whether or not
+  // it will actually lock (the server may still reject it). That fired the
+  // sound/pulse/haptic/announcement for ordinary invalid drops, not only
+  // genuine successes, and — since only the acting Participant's own
+  // optimistic collection ever shows that premature `placedRow` — did so
+  // asymmetrically (remote Participants never saw the false feedback,
+  // contradicting AC #5's "same event, every Participant" premise).
+  // `subscribePiecePlaced` instead fires only from `collections.ts`'s
+  // Realtime handler — which only ever runs for a server-*confirmed* row —
+  // so this can only ever fire once genuine, for every Participant
+  // identically, exactly matching AC #1's "successful piece placement."
+  const t = useTranslations("Canvas");
+  const [muted] = useSoundMuted();
+  // `token` guards against a code review finding: two pulses on the same
+  // piece within `PLACEMENT_PULSE_DURATION_SECONDS` of each other (e.g. a
+  // rejected drop followed by another attempt on the same piece before the
+  // first pulse finishes) — without it, the *first* pulse's own timeout
+  // would unconditionally delete the map entry, erasing the *second*,
+  // newer pulse's color/position before its own animation completes.
+  const [justPlacedPulseById, setJustPlacedPulseById] = useState<
+    ReadonlyMap<string, { color: string; x: number; y: number; token: symbol }>
+  >(new Map());
+  const [announcement, setAnnouncement] = useState("");
+  const [showCompletionGlow, setShowCompletionGlow] = useState(false);
+  // A trailing zero-width space, toggled on every announcement, makes two
+  // back-to-back byte-identical messages (e.g. two consecutive solo
+  // placements, both "Une pièce a été placée dans le Cadre.") differ at the
+  // DOM text-content level — code review fix (2026-09-02): several screen
+  // readers (NVDA, VoiceOver) don't re-announce an `aria-live` region whose
+  // text content hasn't visibly changed, silently dropping the second
+  // announcement otherwise (AC #6).
+  const announcementToggleRef = useRef(false);
+  function announce(message: string) {
+    announcementToggleRef.current = !announcementToggleRef.current;
+    setAnnouncement(announcementToggleRef.current ? `${message}​` : message);
+  }
+
+  // `prefers-reduced-motion` is checked at trigger time (AC #4), not
+  // subscribed to reactively — the reduced-motion fallback is simply never
+  // entering the "just placed" map at all, so no pulse ever renders and the
+  // piece landing at its Frame slot is the only visible change. Adds/removes
+  // this one id — never replaces the whole map — so a second pulse arriving
+  // mid-animation can't truncate a still-in-flight `PlacementPulse` for a
+  // different piece.
+  function triggerPulse(pieceId: string, color: string, position: Point) {
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) {
+      return;
+    }
+    const token = Symbol("pulse");
+    setJustPlacedPulseById((prev) => {
+      const next = new Map(prev);
+      next.set(pieceId, { color, x: position.x, y: position.y, token });
+      return next;
+    });
+    setTimeout(() => {
+      setJustPlacedPulseById((prev) => {
+        // Only clear if this timeout's own pulse is still the current one —
+        // a newer pulse for the same piece (its own token) already
+        // superseded it, and must not be erased early.
+        if (prev.get(pieceId)?.token !== token) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.delete(pieceId);
+        return next;
+      });
+    }, PLACEMENT_PULSE_DURATION_SECONDS * 1000);
+  }
+
+  useEffect(() => {
+    return subscribePiecePlaced((pieceId) => {
+      // The acting Participant's own sprite already played the success
+      // chime and pulse instantly, from its own prediction (code review fix,
+      // 2026-09-02: "the sound should play immediately on release") —
+      // `consumeAndCheckInstantPlacementFeedbackShown` is how this handler
+      // knows that already happened, and skips repeating it. Every *other*
+      // Participant present never predicted anything for this piece, so for
+      // them this confirmed event is the only signal they ever get — AC #5
+      // ("fires for every Participant present... not only the one who
+      // dropped it") depends on this fallback firing for everyone else.
+      if (!consumeAndCheckInstantPlacementFeedbackShown(pieceId)) {
+        if (!muted) {
+          playSuccessChime();
+        }
+        // Only ever the "locked" (green) color here — this event exclusively
+        // means a genuine confirmed lock (`piece-placement-events.ts`), never
+        // a rejection or an overlap; those are local-only (see below), since
+        // there's no server write, and so no Realtime event, for an attempt
+        // that never happened. The piece's own confirmed row is the source
+        // of truth for where to render the pulse (unlike the local instant
+        // path, which must pass its own just-computed position — see
+        // `SoloPieceSprite`'s handleDragEnd).
+        const confirmedPiece = pieces.find((p) => p.id === pieceId);
+        if (confirmedPiece) {
+          triggerPulse(
+            pieceId,
+            PLACEMENT_PULSE_LOCKED_COLOR,
+            pieceRenderPosition(
+              confirmedPiece,
+              clustersById,
+              frameWidth,
+              frameHeight,
+              room.tileWidth,
+              room.tileHeight,
+            ),
+          );
+        }
+      }
+      triggerPlacementHaptic();
+      // Always announces exactly one piece now — every confirmed placement,
+      // solo or a Cluster member, arrives as its own separate event.
+      announce(t("piecePlacedAnnouncement", { count: 1 }));
+    });
+  }, [muted, t, pieces, clustersById, frameWidth, frameHeight, room.tileWidth, room.tileHeight]);
+
+  // Story 3.11 AC #4: the rare "client predicted a lock, the server's own
+  // re-validation disagreed" case — a genuine concurrent conflict, surfaced
+  // as a factual-but-warm toast (never a raw error code), echoed through
+  // the same `aria-live` region Task 3.6 already established rather than a
+  // second announcement mechanism.
+  useEffect(() => {
+    return subscribePlacementConflict(() => {
+      const message = t("placementConflictMessage");
+      toast(message);
+      announce(message);
+    });
+  }, [t]);
+
+  // Story 3.7: fires for every Participant present (AC #3), from the same
+  // confirmed-only Realtime signal `subscribePiecePlaced` already relies
+  // on — never derived from the optimistically-blended `pieces` snapshot
+  // (see `frame-completion-events.ts`'s own comment for why that matters
+  // more here than anywhere else this app fires client-side feedback from).
+  //
+  // `useLayoutEffect`, not `useEffect` — code review fix (2026-09-03): the
+  // collections above are created by `useMemo`, which runs synchronously
+  // during render and opens the Realtime channel immediately. A regular
+  // `useEffect` doesn't run until after the browser has had a chance to
+  // paint, leaving a real window where a Realtime message (delivered via
+  // the WebSocket task queue, never synchronously) could complete the Frame
+  // before this subscription exists — silently losing the one celebration
+  // this whole Room only ever gets once. `useLayoutEffect` runs synchronously
+  // in the same commit as the `useMemo` that opened the channel, with no
+  // point where the event loop could hand control to an incoming message
+  // in between.
+  useLayoutEffect(() => {
+    return subscribeFrameComplete(() => {
+      if (!muted) {
+        playVictorySound();
+      }
+      const reducedMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!reducedMotion) {
+        setShowCompletionGlow(true);
+        setTimeout(() => {
+          setShowCompletionGlow(false);
+        }, FRAME_COMPLETION_GLOW_DURATION_SECONDS * 1000);
+      }
+      announce(t("frameCompleteAnnouncement"));
+    });
+  }, [muted, t]);
+
+  // Split once per render into "renders alone" vs "renders inside its
+  // Cluster's Group" — a piece with a `clusterId` that doesn't (yet) match
+  // a loaded Cluster row is a one-render sync gap (piece update arriving
+  // just ahead of its Cluster's), not a real state; it's excluded from
+  // both until the Cluster row itself arrives.
+  const { soloPieces, membersByClusterId } = useMemo(() => {
+    const solo: RoomDetailPiece[] = [];
+    const byCluster = new Map<string, RoomDetailPiece[]>();
+    for (const piece of pieces) {
+      if (piece.clusterId != null && clustersById.has(piece.clusterId)) {
+        const members = byCluster.get(piece.clusterId) ?? [];
+        members.push(piece);
+        byCluster.set(piece.clusterId, members);
+      } else if (piece.clusterId == null) {
+        solo.push(piece);
+      }
+    }
+    return { soloPieces: solo, membersByClusterId: byCluster };
+  }, [pieces, clustersById]);
+
   // Measures the actual wrapping container (not `window.innerWidth/Height`,
   // which can differ from it — desktop scrollbar gutter, mobile browser
   // chrome affecting `dvh` vs `innerHeight`) so the Stage never exceeds and
@@ -168,28 +1352,6 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
     return () => window.removeEventListener("resize", measure);
   }, []);
 
-  const { halfExtentX, halfExtentY, frameWidth, frameHeight } = useMemo(() => {
-    const frameWidth = room.gridCols * room.tileWidth;
-    const frameHeight = room.gridRows * room.tileHeight;
-    // Content extent is derived from the actual Frame size and every piece's
-    // real scatter position — not a hardcoded assumption about the scatter
-    // radius used at creation time — so nothing is ever clipped or made
-    // unreachable regardless of how a given Room was seeded.
-    return {
-      frameWidth,
-      frameHeight,
-      halfExtentX: Math.max(
-        frameWidth / 2,
-        ...room.pieces.map((p) => Math.abs(p.scatterX) + room.tileWidth / 2),
-      ),
-      halfExtentY: Math.max(
-        frameHeight / 2,
-        ...room.pieces.map((p) => Math.abs(p.scatterY) + room.tileHeight / 2),
-      ),
-    };
-     
-  }, [room]);
-
   const contentHalfExtent = Math.max(halfExtentX, halfExtentY);
   const contentSpan = 2 * contentHalfExtent * CONTENT_MARGIN_FACTOR;
   // `computeFitView` floors both inputs against a transiently zero-size
@@ -205,6 +1367,80 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
   const [position, setPosition] = useState<Point>(fitView.position);
   const [isDraggable, setIsDraggable] = useState(true);
   const lastPinchDistanceRef = useRef<number | null>(null);
+  // A piece being dragged must suspend the Stage's own pan-drag — separate
+  // from `isDraggable`, which pinch/touch-gesture handling below also
+  // toggles; a piece drag can start independent of any touch gesture (e.g.
+  // mouse drag on desktop), so it needs its own guard. No longer doubles as
+  // the z-order key (see `zOrderRef` below) — that used to make a piece pop
+  // back behind others the instant it was released, reported as "strange to
+  // see a piece in front while dragging, then behind another once dropped."
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const isPieceDragging = draggingKey !== null;
+
+  // Persistent z-order: every piece/Cluster ever picked up moves to the
+  // front and *stays* there, even once dropped — unlike the old
+  // `draggingKey`-only approach, which reset the moment a drag ended. Real
+  // state (not a ref) so `renderItems` below can safely read it during
+  // render — React forbids reading a ref's `.current` at render time.
+  //
+  // Keyed by *piece id*, never by a render item's own key (a Cluster's id
+  // isn't stable across the Cluster's own lifetime — a code review finding
+  // caught a real regression here: dragging solo piece A into a stationary
+  // Cluster records A's own id as "recently touched," but the fused result
+  // renders under the *stationary* Cluster's id, which was never recorded —
+  // so the piece a Participant had just interacted with silently dropped to
+  // the back the moment it fused). Ranking a render item by the *best*
+  // (most recent) rank among all its underlying piece ids — one for a solo
+  // piece, every member's for a Cluster — is invariant to exactly this kind
+  // of identity change across a fuse/lock.
+  const [zOrder, setZOrder] = useState<readonly string[]>([]);
+  function bringToFront(pieceIds: readonly string[]) {
+    setZOrder((prev) => [...prev.filter((existingId) => !pieceIds.includes(existingId)), ...pieceIds]);
+  }
+
+  // One combined, ordered render list (rather than "solo pieces, then
+  // Clusters" as two separate fixed-order passes) — a stable sort keeps
+  // any never-touched items in their natural relative order, and ranks
+  // every touched piece/Cluster by how recently it (or, for a Cluster, any
+  // of its current members) was picked up (most recent renders last, i.e.
+  // on top), regardless of whether it's a solo piece or a Cluster.
+  type RenderItem =
+    | { type: "solo"; key: string; pieceIds: readonly string[]; piece: RoomDetailPiece }
+    | {
+        type: "cluster";
+        key: string;
+        pieceIds: readonly string[];
+        cluster: RoomDetailCluster;
+        members: RoomDetailPiece[];
+      };
+  const renderItems = useMemo(() => {
+    const items: RenderItem[] = [
+      ...soloPieces.map(
+        (piece): RenderItem => ({ type: "solo", key: piece.id, pieceIds: [piece.id], piece }),
+      ),
+      ...clusters.flatMap((cluster): RenderItem[] => {
+        const members = membersByClusterId.get(cluster.id);
+        return members
+          ? [
+              {
+                type: "cluster",
+                key: cluster.id,
+                pieceIds: members.map((m) => m.id),
+                cluster,
+                members,
+              },
+            ]
+          : [];
+      }),
+    ];
+    if (zOrder.length === 0) {
+      return items;
+    }
+    const rankByPieceId = new Map(zOrder.map((pieceId, index) => [pieceId, index]));
+    const bestRank = (item: RenderItem) =>
+      Math.max(-1, ...item.pieceIds.map((pieceId) => rankByPieceId.get(pieceId) ?? -1));
+    return [...items].sort((a, b) => bestRank(a) - bestRank(b));
+  }, [soloPieces, clusters, membersByClusterId, zOrder]);
 
   // Derived at render time, not synced via an effect: `scale`/`position`
   // state can go stale relative to `minScale`/`maxScale`/`contentHalfExtent`
@@ -251,6 +1487,14 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
   }
 
   function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
+    // Konva's drag events bubble: a piece's own `dragend` also reaches this
+    // Stage-level handler, and bubbling never reassigns `e.target` past the
+    // original shape — so without this guard, a piece's local x/y would get
+    // written into the Stage's own pan position, snapping the whole canvas
+    // to wherever the piece was dropped on every single piece drag.
+    if (e.target !== e.target.getStage()) {
+      return;
+    }
     // Synced only at drag end, not every `onDragMove` frame — Konva already
     // moves the Stage visually during the drag with no React involvement;
     // syncing state on every frame would force a full re-render (recomputing
@@ -363,7 +1607,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
         scaleY={clampedScale}
         x={clampedPosition.x}
         y={clampedPosition.y}
-        draggable={isDraggable}
+        draggable={isDraggable && !isPieceDragging}
         dragBoundFunc={(pos) =>
           clampPosition(pos, clampedScale, stageSize, contentHalfExtent, PAN_MARGIN)
         }
@@ -382,16 +1626,72 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
             stroke="#A8541F"
             strokeWidth={3 / clampedScale}
           />
-          {room.pieces.map((piece) => (
-            <PieceSprite
-              key={piece.id}
-              piece={piece}
+          {renderItems.map((item) =>
+            item.type === "solo" ? (
+              <SoloPieceSprite
+                key={item.key}
+                piece={item.piece}
+                pieces={pieces}
+                clustersById={clustersById}
+                tileWidth={room.tileWidth}
+                tileHeight={room.tileHeight}
+                frameWidth={frameWidth}
+                frameHeight={frameHeight}
+                roomId={room.id}
+                gridRows={room.gridRows}
+                gridCols={room.gridCols}
+                collection={collection}
+                onDragStart={() => {
+                  setDraggingKey(item.key);
+                  bringToFront(item.pieceIds);
+                }}
+                onDragEnd={() => setDraggingKey(null)}
+                onInstantFrameLockOutcome={triggerPulse}
+              />
+            ) : (
+              <ClusterGroupSprite
+                key={item.key}
+                cluster={item.cluster}
+                members={item.members}
+                pieces={pieces}
+                clustersById={clustersById}
+                tileWidth={room.tileWidth}
+                tileHeight={room.tileHeight}
+                frameWidth={frameWidth}
+                frameHeight={frameHeight}
+                roomId={room.id}
+                gridRows={room.gridRows}
+                gridCols={room.gridCols}
+                collection={collection}
+                onDragStart={() => {
+                  setDraggingKey(item.key);
+                  bringToFront(item.pieceIds);
+                }}
+                onDragEnd={() => setDraggingKey(null)}
+              />
+            ),
+          )}
+          {[...justPlacedPulseById].map(([id, pulse]) => (
+            <PlacementPulse
+              key={`pulse-${id}`}
+              x={pulse.x}
+              y={pulse.y}
               tileWidth={room.tileWidth}
               tileHeight={room.tileHeight}
+              color={pulse.color}
             />
           ))}
+          {showCompletionGlow && (
+            <FrameCompletionGlow frameWidth={frameWidth} frameHeight={frameHeight} />
+          )}
         </Layer>
       </Stage>
+      {/* Decoupled from canvas focus/interaction (AC #6) — a screen-reader
+          user perceives Room activity without needing to interact with the
+          Konva Stage at all, which has no DOM text content of its own. */}
+      <div aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
     </div>
   );
 }

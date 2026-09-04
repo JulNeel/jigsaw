@@ -77,7 +77,7 @@
     "step1Title": "Déplacer une pièce",
     "step1Description": "Glissez-la où vous voulez dans l'espace",
     "step2Title": "Pivoter une pièce",
-    "step2Description": "Double-tapez pour la faire tourner",
+    "step2Description": "Tapez pour la faire tourner",
     "step3Title": "La positionner dans le Cadre",
     "step3Description": "Elle s'accroche seule si elle correspond",
     "step4Title": "Créer un Îlot",
@@ -88,6 +88,11 @@
   },
   "Canvas": {
     "recenterAriaLabel": "Recentrer sur le Cadre",
-    "loading": "Chargement du canevas…"
+    "loading": "Chargement du canevas…",
+    "muteAriaLabel": "Couper le son",
+    "unmuteAriaLabel": "Activer le son",
+    "piecePlacedAnnouncement": "{count, plural, =1 {Une pièce a été placée dans le Cadre.} other {# pièces ont été placées dans le Cadre.}}",
+    "placementConflictMessage": "Un autre Participant vient de la poser juste avant vous.",
+    "frameCompleteAnnouncement": "Le puzzle est terminé — bravo à tout le Salon."
   }
 }
