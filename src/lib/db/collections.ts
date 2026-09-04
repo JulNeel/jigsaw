@@ -24,6 +24,7 @@ import {
   emitPlacementConflict,
 } from "@/lib/rooms/placement-conflict-events";
 import { emitPiecePlaced } from "@/lib/rooms/piece-placement-events";
+import { emitMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
   emitFrameComplete,
   shouldFireFrameComplete,
@@ -317,6 +318,13 @@ export function createRoomCollections({
       // wrong guess.
       const speculativeVersion = expectedVersion + 1;
       ownLastKnownVersionByPieceId.set(pieceId, speculativeVersion);
+      // Recorded before dispatch so the failure branch below knows which
+      // Server Action this was without re-deriving it from `changes` a
+      // second time (`changes.placedRow`/`changes.rotation` haven't been
+      // read yet at that point structurally, but keeping the branch
+      // decision in one place — here — is simpler than repeating the same
+      // three-way check twice).
+      const isMove = changes.placedRow == null && changes.rotation === undefined;
 
       let result;
       if (changes.placedRow != null) {
@@ -358,6 +366,13 @@ export function createRoomCollections({
         // off a guess that just proved incorrect.
         if (ownLastKnownVersionByPieceId.get(pieceId) === speculativeVersion) {
           ownLastKnownVersionByPieceId.delete(pieceId);
+        }
+        // Tells `ClusterGroupSprite`'s `optimisticAnchor` (if this piece is
+        // a Cluster's representative member) to stop trusting its guess
+        // immediately — see `move-conflict-events.ts`'s own comment for why
+        // this explicit signal replaced an earlier data-comparison guess.
+        if (isMove) {
+          emitMoveConflict(pieceId);
         }
         // AD-6: the optimistic local mutation is simply abandoned — no
         // automatic retry that would overwrite server state — and the next

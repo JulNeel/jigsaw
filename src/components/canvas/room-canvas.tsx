@@ -17,6 +17,7 @@ import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import type { RoomDetail, RoomDetailCluster, RoomDetailPiece } from "@/lib/rooms/get-room-by-slug";
 import { createRoomCollections } from "@/lib/db/collections";
 import { markPredictedLock, subscribePlacementConflict } from "@/lib/rooms/placement-conflict-events";
+import { subscribeMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
   consumeAndCheckInstantPlacementFeedbackShown,
   markInstantPlacementFeedbackShown,
@@ -758,34 +759,31 @@ function ClusterGroupSprite({
   // the real anchor has caught up, so the guess is no longer needed
   // (computed at render time, not via an effect — no cleanup required).
   const [optimisticAnchor, setOptimisticAnchor] = useState<
-    | {
-        x: number;
-        y: number;
-        sinceVersion: number;
-        expectedScatterX: number;
-        expectedScatterY: number;
-      }
-    | null
+    { x: number; y: number; sinceVersion: number } | null
   >(null);
   // A rejected write (`STALE_WRITE`) never bumps `cluster.version` at all —
   // nothing commits server-side — so the version-only guard alone would
   // leave a losing client's Cluster stuck at its stale optimistic position
-  // forever instead of reverting (code review fix, Story 3.10, 2026-09-04:
-  // same class of bug `SoloPieceSprite`'s `pendingRestOverride` already hit,
-  // fixed there via `piece.placedRow != null` — a field that cleanly
-  // reverts to its pre-attempt state on rollback). Clusters have no
-  // equivalent null/non-null field (`scatterX`/`scatterY` always hold *some*
-  // value), so the equivalent signal here is comparing against the
-  // *specific* value this drag expected: `handleDragEnd` always sets the
-  // representative member's `scatterX`/`scatterY` to `dropPoint` (both
-  // branches below), so on a genuine rollback TanStack DB reverts those
-  // fields back to their pre-drag value, breaking this equality — the
-  // moment to stop trusting `optimisticAnchor`.
+  // forever instead of reverting (Story 3.10, 2026-09-04). First fix
+  // compared the representative member's live `scatterX`/`scatterY` against
+  // the value the *latest* drag expected — but dragging the same Cluster
+  // repeatedly made it visibly "replay" through every intermediate position
+  // (user report, 2026-09-05): an *earlier*, already-superseded drag's own
+  // confirmed row arriving via Realtime has different scatter values too,
+  // and briefly failed that comparison just like a genuine rejection would,
+  // for every earlier drag's confirmation in turn. Replaced with an
+  // explicit signal (`move-conflict-events.ts`) fired only when this
+  // piece's `movePiece` call actually fails — see its own comment for the
+  // full reasoning.
+  useEffect(() => {
+    return subscribeMoveConflict((pieceId) => {
+      if (pieceId === representativeMember.id) {
+        setOptimisticAnchor(null);
+      }
+    });
+  }, [representativeMember.id]);
   const anchor =
-    optimisticAnchor &&
-    cluster.version <= optimisticAnchor.sinceVersion &&
-    representativeMember.scatterX === optimisticAnchor.expectedScatterX &&
-    representativeMember.scatterY === optimisticAnchor.expectedScatterY
+    optimisticAnchor && cluster.version <= optimisticAnchor.sinceVersion
       ? optimisticAnchor
       : { x: cluster.anchorX, y: cluster.anchorY };
 
@@ -800,12 +798,7 @@ function ClusterGroupSprite({
       x: groupAnchor.x + representativeMember.clusterOffsetCol! * tileWidth,
       y: groupAnchor.y + representativeMember.clusterOffsetRow! * tileHeight,
     };
-    setOptimisticAnchor({
-      ...groupAnchor,
-      sinceVersion: cluster.version,
-      expectedScatterX: dropPoint.x,
-      expectedScatterY: dropPoint.y,
-    });
+    setOptimisticAnchor({ ...groupAnchor, sinceVersion: cluster.version });
     // Generic "piece released" sound — every drop, anywhere on the Canvas,
     // exactly as for a solo piece (`SoloPieceSprite`'s handleDragEnd).
     if (!muted) {
