@@ -1367,6 +1367,11 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
   const [position, setPosition] = useState<Point>(fitView.position);
   const [isDraggable, setIsDraggable] = useState(true);
   const lastPinchDistanceRef = useRef<number | null>(null);
+  // Live scale/position while a pinch is in progress, updated imperatively
+  // on the Konva Stage every frame (see `handleTouchMove`) — never through
+  // `setScale`/`setPosition` mid-gesture, so a re-render doesn't happen on
+  // every single `touchmove`. `null` whenever no pinch is in flight.
+  const pinchLiveRef = useRef<{ scale: number; position: Point } | null>(null);
   // A piece being dragged must suspend the Stage's own pan-drag — separate
   // from `isDraggable`, which pinch/touch-gesture handling below also
   // toggles; a piece drag can start independent of any touch gesture (e.g.
@@ -1527,6 +1532,15 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
   // getting stuck `false` with no path back to `true`.
   function handleTouchTransition(touchCount: number) {
     lastPinchDistanceRef.current = null;
+    if (touchCount < 2 && pinchLiveRef.current) {
+      // Sync React state to match wherever the pinch's own imperative
+      // Konva updates actually left the Stage — exactly once, at gesture
+      // end, mirroring `handleDragEnd`'s own "Konva already moved it,
+      // React only needs to catch up now" pattern for panning.
+      setScale(pinchLiveRef.current.scale);
+      setPosition(pinchLiveRef.current.position);
+      pinchLiveRef.current = null;
+    }
     setIsDraggable(touchCount < 2);
   }
 
@@ -1556,7 +1570,34 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
     const distance = distanceBetween(a, b);
     const midpoint = midpointBetween(a, b);
     if (lastPinchDistanceRef.current != null) {
-      applyZoom(midpoint, clampedScale * (distance / lastPinchDistanceRef.current));
+      // Code review fix (2026-09-04, user report: pinch-to-zoom registered
+      // but stuttered badly on Firefox for Android, while smooth on
+      // Samsung Internet): this used to call `applyZoom`, which sets React
+      // state (`setScale`/`setPosition`) on every single `touchmove` frame
+      // — forcing a full re-render (recomputing extents, re-rendering
+      // every PieceSprite) at whatever rate the browser fires touchmove,
+      // uncoalesced on some browsers. Now mirrors `handleDragEnd`'s own
+      // pattern for panning: Konva's Stage is moved directly/imperatively
+      // every frame, with React state only synced once the gesture ends
+      // (`handleTouchTransition`, above) — no per-frame re-render at all.
+      const base = pinchLiveRef.current ?? { scale: clampedScale, position: clampedPosition };
+      const newScale = clampScale(
+        base.scale * (distance / lastPinchDistanceRef.current),
+        minScale,
+        maxScale,
+      );
+      const newPosition = clampPosition(
+        zoomAtPoint(midpoint, base.scale, newScale, base.position),
+        newScale,
+        stageSize,
+        contentHalfExtent,
+        PAN_MARGIN,
+      );
+      pinchLiveRef.current = { scale: newScale, position: newPosition };
+      const stage = e.target.getStage();
+      stage?.scale({ x: newScale, y: newScale });
+      stage?.position(newPosition);
+      stage?.batchDraw();
     }
     lastPinchDistanceRef.current = distance;
   }
