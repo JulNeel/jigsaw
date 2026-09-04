@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.10: Work on multiple Clusters in parallel
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -88,7 +88,8 @@ None — every step passed cleanly (build/lint/test all green).
 - `dropPoint` (previously computed after `setOptimisticAnchor`) is now computed first, so its value can be captured into `optimisticAnchor` in the same call — a pure reordering, no behavior change to `dropPoint` itself.
 - `pnpm build`/`pnpm lint`/`pnpm test` all clean (203 tests, 26 files — unchanged count, this story added no new automated tests per its own Dev Notes: no component-testing infrastructure exists in this repo, and this is UI-state logic inside a Konva component).
 - **Not verified in this environment: the actual multi-Participant behavior.** This session has no browser/screenshot tooling, so none of this story's three manual-verification subtasks (two different Clusters dragged in parallel; two Participants racing on the *same* Cluster, confirming the loser now visibly reverts instead of sticking; Story 3.9's own regression checks) were performed here. **Please verify locally, ideally with two browser tabs/sessions in the same Room**: (1) drag two different Clusters at once — both should move independently with no interference (expected: already worked before this story); (2) drag the *same* Cluster from both tabs at nearly the same moment — the losing tab's Cluster should now visibly snap back to the winning tab's confirmed position shortly after, not stay stuck at the loser's own dropped spot; (3) a normal, uncontested Cluster drag/fuse/lock-into-Frame still behaves exactly as before (regression check on Task 2's change).
-- **Held at `in-progress`, not `review` (2026-09-04, user instruction): manual multi-Participant verification needs two independent real clients, which realistically means testing against a deployment, not local dev alone.** All tasks/subtasks are otherwise complete and `pnpm build`/`pnpm lint`/`pnpm test` are clean — this is a deliberate hold for a deploy-then-verify step, not unfinished work. Move to `review` once the manual checks above have actually been run.
+- **Held at `in-progress`, not `review` (2026-09-04, user instruction): manual multi-Participant verification needs two independent real clients, which realistically means testing against a deployment, not local dev alone.** All tasks/subtasks are otherwise complete and `pnpm build`/`pnpm lint`/`pnpm test` are clean — this is a deliberate hold for a deploy-then-verify step, not unfinished work.
+- **User confirmed all manual verification steps pass (2026-09-04)**, after resolving an unrelated deployment issue (`DATABASE_URL` pointing at a DNS name that doesn't resolve from Vercel's network — fixed by switching to Supabase's Session pooler connection string) and a separately-reported/fixed pinch-to-zoom bug on Firefox for Android (Story 3.3, not this story — see its own Change Log). Story closed.
 
 ### File List
 
@@ -99,3 +100,4 @@ None — every step passed cleanly (build/lint/test all green).
 | Date | Change |
 |------|--------|
 | 2026-09-04 | Story created: confirm parallel-Cluster manipulation has no exclusive lock (AC #1), fix a diagnosed real bug where a rejected same-Cluster move leaves the losing client's `optimisticAnchor` permanently stuck instead of reverting (AC #2). Avatar-chip AC removed from scope per user decision — no Participant identity/presence system exists yet (Epic 4, not started). |
+| 2026-09-04 | User confirmed all manual verification steps pass on the deployed environment. Story closed. |
