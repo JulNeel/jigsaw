@@ -1532,6 +1532,18 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
 
   function handleTouchStart(e: Konva.KonvaEventObject<TouchEvent>) {
     handleTouchTransition(e.evt.touches.length);
+    // A second finger landing can arrive after Konva's own native Stage
+    // drag has *already* engaged from the first finger alone — setting
+    // `isDraggable` above only takes effect once React re-renders and
+    // Konva's `draggable` prop actually updates, which can lag behind the
+    // synchronous native touch event stream (observed: pinch-to-zoom not
+    // registering at all on Firefox for Android). `stopDrag()` is an
+    // imperative Konva API call that cancels any in-flight drag
+    // immediately, with no render round-trip needed, so a pinch is never
+    // fought by a drag that started a frame earlier.
+    if (e.evt.touches.length >= 2) {
+      e.target.getStage()?.stopDrag();
+    }
   }
 
   function handleTouchMove(e: Konva.KonvaEventObject<TouchEvent>) {
