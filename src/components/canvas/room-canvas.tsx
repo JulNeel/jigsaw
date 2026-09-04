@@ -602,8 +602,23 @@ function SoloPieceSprite({
         tileHeight,
         knownPieces: pieces,
       });
-      if (!muted && fusionOutcome === "genuine") {
-        playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+      if (fusionOutcome === "genuine") {
+        if (!muted) {
+          playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+        }
+        // User feedback (2026-09-04): "la fusion visuelle pourrait au moins
+        // être optimiste" — a predicted-genuine fusion already visually
+        // rests exactly at the touching drop point (correct either way),
+        // but nothing signaled "this connected" the way a Frame lock's
+        // green pulse does, until the server's confirmed `cluster_id`
+        // eventually re-renders the pair as a `ClusterGroupSprite` —
+        // noticeably later than the sound. This reuses that exact same
+        // pulse mechanism, purely cosmetic: it does not make the pair
+        // draggable as one unit before confirmation (a bigger, separately-
+        // tracked gap, see deferred-work.md's "Fusion has no confirmed-
+        // broadcast counterpart"), only acknowledges the connection
+        // instantly, the same way placement's own pulse does.
+        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
       }
       collection.update(piece.id, (draft) => {
         draft.scatterX = dropPoint.x;
@@ -671,6 +686,7 @@ function ClusterGroupSprite({
   collection,
   onDragStart,
   onDragEnd,
+  onInstantFrameLockOutcome,
 }: {
   cluster: RoomDetailCluster;
   members: RoomDetailPiece[];
@@ -686,6 +702,7 @@ function ClusterGroupSprite({
   collection: PieceCollection;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
 }) {
   // Any member works as the one reported to the Server Action — its own
   // math recovers the Cluster's anchor from whichever member's own screen
@@ -889,8 +906,13 @@ function ClusterGroupSprite({
         tileHeight,
         knownPieces: pieces,
       });
-      if (!muted && fusionOutcome === "genuine") {
-        playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+      if (fusionOutcome === "genuine") {
+        if (!muted) {
+          playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+        }
+        // Same instant, purely cosmetic acknowledgment as
+        // `SoloPieceSprite`'s own fusion branch — see its comment for why.
+        onInstantFrameLockOutcome(representativeMember.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
       }
       collection.update(representativeMember.id, (draft) => {
         draft.scatterX = dropPoint.x;
@@ -1721,6 +1743,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
                   bringToFront(item.pieceIds);
                 }}
                 onDragEnd={() => setDraggingKey(null)}
+                onInstantFrameLockOutcome={triggerPulse}
               />
             ),
           )}

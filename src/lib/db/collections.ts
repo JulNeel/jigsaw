@@ -64,6 +64,25 @@ export function createRoomCollections({
   // costs nothing and avoids any assumption about that.
   const pendingByPieceId = new Map<string, PendingVersionWait[]>();
 
+  // The version this *same client's own* most recent successful move/place
+  // actually produced, keyed by piece id — read from the Server Action's
+  // own synchronous return value, never waiting for that write's Realtime
+  // confirmation to arrive first. Without this, a second move/place fired
+  // on the same piece before its predecessor's confirmation lands would use
+  // `mutation.original.version` — which only ever changes once Realtime
+  // confirms, never from an optimistic mutation — so it'd carry the exact
+  // same (now-stale) version the first write already consumed, and get
+  // rejected as `STALE_WRITE` even though nothing but this same client's
+  // own prior action changed. Unlike `rotatePiece` (commutative, so it
+  // simply never needs `expectedVersion` at all — see its own comment),
+  // move/place are position-setting, not order-independent, so a genuine
+  // conflict between two *different* Participants must still be rejected —
+  // this only patches the false-positive case where the "conflict" is a
+  // client racing against its own not-yet-confirmed prior write. Cleared
+  // once the real confirmed version catches up (`pieceHandler`, below), so
+  // this never grows unbounded or outlives its purpose.
+  const ownLastKnownVersionByPieceId = new Map<string, number>();
+
   // Story 3.6 placement feedback needs to know when a piece's `placed_row`
   // transitions from unset to server-*confirmed*-set — never from an
   // optimistic guess. Seeded from the initial snapshot so an already-placed
@@ -240,6 +259,12 @@ export function createRoomCollections({
           });
           commit();
           resolvePending(piece.id, piece.version);
+          // The confirmed version has caught up to (or passed) this
+          // client's own last known write — the entry has done its job.
+          const ownVersion = ownLastKnownVersionByPieceId.get(piece.id);
+          if (ownVersion != null && piece.version >= ownVersion) {
+            ownLastKnownVersionByPieceId.delete(piece.id);
+          }
           if (piece.placedRow != null && !confirmedPlacedIds.has(piece.id)) {
             confirmedPlacedIds.add(piece.id);
             emitPiecePlaced(piece.id);
@@ -268,7 +293,13 @@ export function createRoomCollections({
       const mutation = transaction.mutations[0];
       const pieceId = mutation.key as string;
       const changes = mutation.changes as Partial<RoomDetailPiece>;
-      const expectedVersion = mutation.original.version;
+      // Floors at this client's own last known write for this piece, if
+      // more recent than what the optimistic snapshot itself reflects —
+      // see `ownLastKnownVersionByPieceId`'s own comment for why.
+      const expectedVersion = Math.max(
+        mutation.original.version,
+        ownLastKnownVersionByPieceId.get(pieceId) ?? 0,
+      );
 
       let result;
       if (changes.placedRow != null) {
@@ -309,6 +340,14 @@ export function createRoomCollections({
         // optimistic change back.
         throw new Error(result.error.code);
       }
+
+      // Recorded from the Server Action's own synchronous return value —
+      // available well before this same write's Realtime confirmation
+      // arrives — so the *next* mutation on this piece (should one fire
+      // before that confirmation lands) computes a correct, non-stale
+      // `expectedVersion` above instead of racing against its own
+      // predecessor.
+      ownLastKnownVersionByPieceId.set(pieceId, result.version);
 
       // Story 3.11 AC #4: fires only when the client's own prediction
       // (`predictFrameLock`) said this specific piece would lock, and the
