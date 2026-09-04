@@ -21,4 +21,11 @@ export const LIBRARY_IMAGES: LibraryImage[] = [
     width: 1587,
     height: 1123,
   },
+  {
+    id: "office-developer-night",
+    src: "/library/jbee_office_jigsaw_image2.png",
+    alt: "Illustration d'un bureau de développeur avec double écran, la nuit",
+    width: 5000,
+    height: 3200,
+  },
 ];
