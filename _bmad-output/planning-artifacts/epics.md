@@ -454,6 +454,23 @@ So that the Room feels like a real jigsaw puzzle, not a sliding-tile grid.
 
 **Note — scope decision (2026-09-03), confirmed with the user before this story was written:** implemented as a client-side rendering mask (Konva `clipFunc`) over the *existing* plain rectangular tiles — not a real server-side re-slice of the stored tile images. From a Participant's perspective the two approaches are visually indistinguishable; the mask approach needs no new image-manipulation library (none is installed today, e.g. no `sharp`), no Storage/schema/migration changes, and stays crisp at any zoom level since the silhouette is a vector path recomputed per render rather than a fixed-resolution bitmap. Explicitly supersedes the "future story could reslice with real tab curves" framing in Story 2.4's Dev Notes — re-slicing was the imagined approach at the time, before this trade-off was considered.
 
+### Story 3.13: Optimistic fusion
+
+As a Participant,
+I want two pieces that genuinely touch to immediately behave as one movable Îlot,
+So that fusing pieces feels as instant and confident as placing one does (Story 3.11), not a "sound now, behavior later" experience.
+
+**Acceptance Criteria:**
+
+**Given** a piece (or Îlot) dropped into genuine contact with another piece/Îlot, evaluated by the same client-side prediction Story 3.11 already computes (`predictFusionOutcome`)
+**When** that prediction says the fusion is genuine
+**Then** the involved pieces immediately render and drag together as one Îlot — no waiting for the server's confirmed `cluster_id` before they can be moved as a group
+**And** if the server's own re-validation disagrees with the prediction (a genuine rare conflict), the optimistic Îlot is undone and each piece reverts to its last confirmed, independent position — never left visually merged but wrong, never disappearing
+**And** once the server confirms the predicted fusion was correct, the optimistic local Îlot is replaced by the real confirmed one with no visible flicker or jump
+**And** this remains purely a rendering/interaction concern — FR6/AD-2's rule that the server is the sole authority for whether a fusion is real is completely unchanged; prediction only ever anticipates, never substitutes for, server validation
+
+**Note — scope decision (2026-09-04), confirmed with the user before this story was written:** this is the harder half of Story 3.6/3.11's own placement-feedback work, explicitly deferred at the time (`deferred-work.md`: "Fusion has no confirmed-broadcast counterpart") because it needs a genuinely different mechanism than a cosmetic pulse — the *cluster association itself* (dragging the pair as one unit) must exist locally before confirmation, not just a sound/visual acknowledgment (already shipped 2026-09-04, reusing the placement pulse). Recommended approach: a local-only "predicted fusion" override in `room-canvas.tsx` (same idiom as `pendingRestOverride`/`optimisticAnchor`), not a write to the currently-read-only `clusters` TanStack DB collection — see the story file's own Dev Notes for the full reasoning.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
