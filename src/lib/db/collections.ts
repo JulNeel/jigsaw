@@ -300,6 +300,23 @@ export function createRoomCollections({
         mutation.original.version,
         ownLastKnownVersionByPieceId.get(pieceId) ?? 0,
       );
+      // Speculatively advance the floor *before* awaiting the Server
+      // Action's response — code review fix (2026-09-04, user report: the
+      // original version of this fix "ne semble pas fonctionner"). Setting
+      // it only *after* a successful response left the exact same race
+      // unfixed whenever two actions on the same piece fire close enough
+      // together that the second's `onUpdate` reads this map before the
+      // first's own response has come back — each `.update()` call starts
+      // its own independent direct-op transaction immediately (TanStack
+      // DB), so two rapid actions race each other, not just the eventual
+      // Realtime confirmation. Every successful place/move/rotate
+      // increments the row's `version` by exactly 1 server-side, so
+      // `expectedVersion + 1` is the correct speculative next value —
+      // rolled back below if *this* action turns out to fail, so a
+      // genuine rejection doesn't poison a later action's floor with a
+      // wrong guess.
+      const speculativeVersion = expectedVersion + 1;
+      ownLastKnownVersionByPieceId.set(pieceId, speculativeVersion);
 
       let result;
       if (changes.placedRow != null) {
@@ -332,6 +349,16 @@ export function createRoomCollections({
       }
 
       if (!result.success) {
+        // This action's own speculative bump above was wrong — remove it,
+        // but only if nothing newer has since replaced it (a later,
+        // still-in-flight action's own speculative value must not be
+        // clobbered by an earlier action failing after it). A subsequent
+        // action then falls back to whatever this map (or the confirmed
+        // collection) next actually knows to be true, instead of chaining
+        // off a guess that just proved incorrect.
+        if (ownLastKnownVersionByPieceId.get(pieceId) === speculativeVersion) {
+          ownLastKnownVersionByPieceId.delete(pieceId);
+        }
         // AD-6: the optimistic local mutation is simply abandoned — no
         // automatic retry that would overwrite server state — and the next
         // Realtime event for this piece (already in flight regardless)
@@ -340,14 +367,6 @@ export function createRoomCollections({
         // optimistic change back.
         throw new Error(result.error.code);
       }
-
-      // Recorded from the Server Action's own synchronous return value —
-      // available well before this same write's Realtime confirmation
-      // arrives — so the *next* mutation on this piece (should one fire
-      // before that confirmation lands) computes a correct, non-stale
-      // `expectedVersion` above instead of racing against its own
-      // predecessor.
-      ownLastKnownVersionByPieceId.set(pieceId, result.version);
 
       // Story 3.11 AC #4: fires only when the client's own prediction
       // (`predictFrameLock`) said this specific piece would lock, and the
