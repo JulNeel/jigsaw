@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.16: Highlight the frame pieces
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -22,23 +22,23 @@ so that I can sort them out from the pile the way I would with a physical puzzle
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Thread a `highlightFramePieces` flag down to every rendered piece (AC: #1, #3, #5)
-  - [ ] `src/lib/rooms/get-room-by-slug.ts` already computes and returns `shapeType: PieceShapeType` (`"corner" | "edge" | "interior"`, `src/lib/piece-cutting/classify-piece-shape.ts`) on every `RoomDetailPiece` — no new data/query needed at all. A piece is a "frame piece" exactly when `piece.shapeType !== "interior"`.
-  - [ ] `src/components/canvas/room-canvas.tsx`'s `PieceSprite` (~L247-330, the shared leaf renderer both `SoloPieceSprite` and `ClusterGroupSprite` use for every individual piece) gets a new optional prop, e.g. `dimmed?: boolean`, applied as `opacity: dimmed ? INTERIOR_PIECE_DIMMED_OPACITY : 1` on its `groupProps` (~L298-310, the same object already carrying `x`/`y`/`rotation`/`draggable`/drag handlers/`clipFunc` onto the Konva `<Group>` — Konva `Group` supports `opacity` natively). New constant `INTERIOR_PIECE_DIMMED_OPACITY` (e.g. `0.2` — reasonable default, not spec-mandated, tune visually), declared alongside this file's other visual constants (`PLACEMENT_PULSE_*`, ~L56-59).
-  - [ ] `SoloPieceSprite`/`ClusterGroupSprite` each gain a new `highlightFramePieces: boolean` prop, computing `dimmed={highlightFramePieces && piece.shapeType === "interior"}` per piece when rendering `PieceSprite` — for `ClusterGroupSprite`, this is evaluated *per member* (an Îlot can genuinely mix a frame piece and an interior piece fused together), not once for the whole Cluster.
-  - [ ] `RoomCanvas` (~L1200) gains its own new prop `highlightFramePieces: boolean` (see Task 2 for why this is a plain prop, not internal state or an imperative-handle method like `recenter()`), passed straight through to both `SoloPieceSprite`/`ClusterGroupSprite` at their JSX call sites (~L1908-1950).
-  - [ ] Since dimming is derived at render time directly from each `RoomDetailPiece.shapeType` + the boolean flag — never cached, never computed only once at drag-start or fuse-time — a piece that arrives, moves, or re-fuses via Realtime automatically renders with the correct dim state on its very next render, satisfying AC #5 with no extra plumbing.
+- [x] Task 1: Thread a `highlightFramePieces` flag down to every rendered piece (AC: #1, #3, #5)
+  - [x] `src/lib/rooms/get-room-by-slug.ts` already computes and returns `shapeType: PieceShapeType` (`"corner" | "edge" | "interior"`, `src/lib/piece-cutting/classify-piece-shape.ts`) on every `RoomDetailPiece` — no new data/query needed at all. A piece is a "frame piece" exactly when `piece.shapeType !== "interior"`.
+  - [x] `src/components/canvas/room-canvas.tsx`'s `PieceSprite` (~L247-330, the shared leaf renderer both `SoloPieceSprite` and `ClusterGroupSprite` use for every individual piece) gets a new optional prop, e.g. `dimmed?: boolean`, applied as `opacity: dimmed ? INTERIOR_PIECE_DIMMED_OPACITY : 1` on its `groupProps` (~L298-310, the same object already carrying `x`/`y`/`rotation`/`draggable`/drag handlers/`clipFunc` onto the Konva `<Group>` — Konva `Group` supports `opacity` natively). New constant `INTERIOR_PIECE_DIMMED_OPACITY` (e.g. `0.2` — reasonable default, not spec-mandated, tune visually), declared alongside this file's other visual constants (`PLACEMENT_PULSE_*`, ~L56-59).
+  - [x] `SoloPieceSprite`/`ClusterGroupSprite` each gain a new `highlightFramePieces: boolean` prop, computing `dimmed={highlightFramePieces && piece.shapeType === "interior"}` per piece when rendering `PieceSprite` — for `ClusterGroupSprite`, this is evaluated *per member* (an Îlot can genuinely mix a frame piece and an interior piece fused together), not once for the whole Cluster.
+  - [x] `RoomCanvas` (~L1200) gains its own new prop `highlightFramePieces: boolean` (see Task 2 for why this is a plain prop, not internal state or an imperative-handle method like `recenter()`), passed straight through to both `SoloPieceSprite`/`ClusterGroupSprite` at their JSX call sites (~L1908-1950).
+  - [x] Since dimming is derived at render time directly from each `RoomDetailPiece.shapeType` + the boolean flag — never cached, never computed only once at drag-start or fuse-time — a piece that arrives, moves, or re-fuses via Realtime automatically renders with the correct dim state on its very next render, satisfying AC #5 with no extra plumbing.
 
-- [ ] Task 2: Lift the toggle's state to `RoomView` and add the button (AC: #2, #4)
-  - [ ] **Read `src/components/room/room-view.tsx` and `src/components/canvas/room-canvas.tsx`'s `RoomCanvasHandle`/`RoomCanvasProps` (~L1190-1200) before touching either.** `RecenterButton` reaches into `RoomCanvas` via an *imperative* ref handle (`recenter()`) specifically because `RoomCanvas` owns pan/zoom state internally with no need for `RoomView` to ever read or display it back. This toggle is different: the *button itself* must visibly reflect whether it's currently active (AC #4), which means `RoomView` needs to read the current boolean to render the button's own pressed/active styling — an imperative-only method can't feed a value back up for rendering. Use ordinary lifted React state instead: `const [highlightFramePieces, setHighlightFramePieces] = useState(false)` in `RoomView`, passed down to `RoomCanvasClient`/`RoomCanvas` as a new prop (Task 1) and to the new button as `active`/`onToggle`.
-  - [ ] New component `src/components/canvas/highlight-frame-pieces-button.tsx`, following `RecenterButton`/`SoundMuteButton`/`ReferenceImageButton`'s exact established overlay convention (plain DOM `Button`, absolutely positioned sibling of the Canvas, same `right-6` column) — stacked one slot further up again, e.g. `bottom-[calc(env(safe-area-inset-bottom)+13.5rem)]` (`ReferenceImageButton` sits at `+9.5rem`).
-  - [ ] A real toggle button: `aria-pressed={active}` (same accessible pattern `create-room-form.tsx`'s library-image selection already uses, not two different aria-labels the way `SoundMuteButton` does it) plus a visibly different `variant` when active (e.g. `variant={active ? "default" : "outline"}`, reusing the `Button` component's own existing variants rather than inventing new styling) so AC #4 doesn't rely on `aria-pressed` alone for sighted users.
-  - [ ] Pick a `lucide-react` icon distinct from every icon already used on this stack (`Crosshair`, `Volume2`/`VolumeX`, `ImageIcon`) — check the installed `lucide-react` version's actual icon list before choosing (do not assume a name exists), something evoking a puzzle frame/border.
-  - [ ] New `aria-label` translation key in `messages/fr.json`'s `Canvas` section, e.g. `"highlightFramePiecesAriaLabel": "Repérer les pièces de cadre"` — one static label plus `aria-pressed` is the correct accessible pattern for a toggle (per this task's own note above), not two state-dependent labels.
-  - [ ] Wire into `RoomView` as a new sibling alongside the other three overlay buttons, passing the lifted `highlightFramePieces` state down to `RoomCanvasClient` and `active`/`onToggle={() => setHighlightFramePieces((v) => !v)}` to the new button.
+- [x] Task 2: Lift the toggle's state to `RoomView` and add the button (AC: #2, #4)
+  - [x] **Read `src/components/room/room-view.tsx` and `src/components/canvas/room-canvas.tsx`'s `RoomCanvasHandle`/`RoomCanvasProps` (~L1190-1200) before touching either.** `RecenterButton` reaches into `RoomCanvas` via an *imperative* ref handle (`recenter()`) specifically because `RoomCanvas` owns pan/zoom state internally with no need for `RoomView` to ever read or display it back. This toggle is different: the *button itself* must visibly reflect whether it's currently active (AC #4), which means `RoomView` needs to read the current boolean to render the button's own pressed/active styling — an imperative-only method can't feed a value back up for rendering. Use ordinary lifted React state instead: `const [highlightFramePieces, setHighlightFramePieces] = useState(false)` in `RoomView`, passed down to `RoomCanvasClient`/`RoomCanvas` as a new prop (Task 1) and to the new button as `active`/`onToggle`.
+  - [x] New component `src/components/canvas/highlight-frame-pieces-button.tsx`, following `RecenterButton`/`SoundMuteButton`/`ReferenceImageButton`'s exact established overlay convention (plain DOM `Button`, absolutely positioned sibling of the Canvas, same `right-6` column) — stacked one slot further up again, e.g. `bottom-[calc(env(safe-area-inset-bottom)+13.5rem)]` (`ReferenceImageButton` sits at `+9.5rem`).
+  - [x] A real toggle button: `aria-pressed={active}` (same accessible pattern `create-room-form.tsx`'s library-image selection already uses, not two different aria-labels the way `SoundMuteButton` does it) plus a visibly different `variant` when active (e.g. `variant={active ? "default" : "outline"}`, reusing the `Button` component's own existing variants rather than inventing new styling) so AC #4 doesn't rely on `aria-pressed` alone for sighted users.
+  - [x] Pick a `lucide-react` icon distinct from every icon already used on this stack (`Crosshair`, `Volume2`/`VolumeX`, `ImageIcon`) — check the installed `lucide-react` version's actual icon list before choosing (do not assume a name exists), something evoking a puzzle frame/border. Confirmed `frame.mjs` exists in the installed `lucide-react` package and exports `Frame` — used directly, matching this app's own "the Frame" terminology.
+  - [x] New `aria-label` translation key in `messages/fr.json`'s `Canvas` section, e.g. `"highlightFramePiecesAriaLabel": "Repérer les pièces de cadre"` — one static label plus `aria-pressed` is the correct accessible pattern for a toggle (per this task's own note above), not two state-dependent labels.
+  - [x] Wire into `RoomView` as a new sibling alongside the other three overlay buttons, passing the lifted `highlightFramePieces` state down to `RoomCanvasClient` and `active`/`onToggle={() => setHighlightFramePieces((v) => !v)}` to the new button.
 
-- [ ] Task 3: Regression + manual verification (AC: all)
-  - [ ] `pnpm build && pnpm lint && pnpm test` clean.
+- [x] Task 3: Regression + manual verification (AC: all)
+  - [x] `pnpm build && pnpm lint && pnpm test` clean.
   - [ ] Manual verification (this repo has no canvas/visual-regression or component-testing infrastructure, consistent with every other Canvas-interaction story this session): (1) activate the toggle and confirm every loose interior piece dims while every loose corner/edge piece stays fully visible; (2) confirm a Cluster/Îlot mixing a frame piece and an interior piece dims only the interior member; (3) confirm a piece already locked into the Frame also dims/stays visible correctly per its own `shapeType`; (4) confirm dragging, clicking (rotate), and dropping a dimmed piece still works exactly as before — the dim is purely visual; (5) deactivate the toggle and confirm every piece instantly returns to full visibility; (6) with two browser sessions in the same Room, toggle it on in one session only and confirm the *other* session's own pieces are unaffected (this is deliberately local-only UI state, not synced Room state) while a piece one Participant moves still renders with the *other* Participant's own current toggle state correctly applied.
 
 ## Dev Notes
@@ -86,14 +86,29 @@ This is a static opacity change, not an animation (unlike the placement pulse or
 
 ### Agent Model Used
 
+Claude Sonnet 5
+
 ### Debug Log References
+
+- `pnpm build && pnpm lint && pnpm test` — clean on first pass. 203 tests passing, no regressions.
+- Note: this branch was cut from `main` before Story 3.15's `onDragStart`/`onDragEnd` signature change (adding a Konva event parameter) was merged — `SoloPieceSprite`/`ClusterGroupSprite` here still take bare `() => void` callbacks, matching current `main`. No overlap with this story's own changes (a new `highlightFramePieces` prop, independent of the drag-event plumbing), but a small merge conflict on those two interface blocks is possible whenever 3.15 lands — expected and easy to resolve, not a defect in either story.
 
 ### Completion Notes List
 
+- Task 1: `INTERIOR_PIECE_DIMMED_OPACITY` (0.2) added alongside the file's other visual constants. `PieceSprite` gained a `dimmed?: boolean` prop applied as `opacity` on its `groupProps`. `SoloPieceSprite`/`ClusterGroupSprite` gained `highlightFramePieces: boolean`, computing `dimmed` per piece (per *member* for a Cluster) from `piece.shapeType !== "interior"`. `RoomCanvasProps` gained `highlightFramePieces: boolean` (non-optional — always supplied by `RoomView`), threaded to both JSX call sites in `renderItems.map`.
+- Task 2: New `HighlightFramePiecesButton` (`highlight-frame-pieces-button.tsx`) — a real toggle (`aria-pressed` + `variant={active ? "default" : "outline"}`), using the `Frame` icon from `lucide-react`. `RoomView` lifted `highlightFramePieces` as ordinary `useState(false)`, passed to `RoomCanvasClient` and to the new button. New `Canvas.highlightFramePiecesAriaLabel` key in `messages/fr.json`.
+- Task 3: `pnpm build && pnpm lint && pnpm test` all clean. Manual verification left unchecked — this environment has no browser to actually toggle the button and visually confirm dimming/undimming across loose, clustered, and Frame-locked pieces, or to test the two-Participant scenario (item 6); needs the user's own pass per the story's Task 3 checklist.
+
 ### File List
+
+- `src/components/canvas/room-canvas.tsx` (modified — `INTERIOR_PIECE_DIMMED_OPACITY`, `PieceSprite`'s `dimmed` prop, `SoloPieceSprite`/`ClusterGroupSprite`'s `highlightFramePieces` prop, `RoomCanvasProps`'s `highlightFramePieces` prop, JSX wiring)
+- `src/components/canvas/highlight-frame-pieces-button.tsx` (new)
+- `src/components/room/room-view.tsx` (modified — lifted `highlightFramePieces` state, button wired in)
+- `messages/fr.json` (modified — new `Canvas.highlightFramePiecesAriaLabel` key)
 
 ## Change Log
 
 | Date | Change |
 |------|--------|
 | 2026-09-05 | Story created: a toggle button that dims every non-frame ("interior") piece, reusing the already-existing `PieceShapeType` classification with no new data/query needed. Interaction chosen as an on/off toggle (not press-and-hold) per user decision, with no state persistence across reloads. |
+| 2026-09-05 | Implemented both tasks: `highlightFramePieces` threaded from lifted `RoomView` state down to every piece's `opacity`, new `HighlightFramePiecesButton` toggle wired in. `pnpm build && pnpm lint && pnpm test` clean. Status → review; manual verification left to the user (no browser in this environment). |

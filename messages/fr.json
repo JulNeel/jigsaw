@@ -92,6 +92,7 @@
     "muteAriaLabel": "Couper le son",
     "unmuteAriaLabel": "Activer le son",
     "referenceImageAriaLabel": "Voir l'image de référence",
+    "highlightFramePiecesAriaLabel": "Repérer les pièces de cadre",
     "piecePlacedAnnouncement": "{count, plural, =1 {Une pièce a été placée dans le Cadre.} other {# pièces ont été placées dans le Cadre.}}",
     "placementConflictMessage": "Un autre Participant vient de la poser juste avant vous.",
     "frameCompleteAnnouncement": "Le puzzle est terminé — bravo à tout le Salon."

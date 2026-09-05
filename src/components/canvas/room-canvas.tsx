@@ -66,6 +66,11 @@ const PLACEMENT_PULSE_DURATION_SECONDS = 0.32;
 const FRAME_COMPLETION_GLOW_COLOR = "#A67518";
 const FRAME_COMPLETION_GLOW_DURATION_SECONDS = 1.2;
 
+// Story 3.16: how much a non-frame ("interior") piece dims while the
+// "highlight frame pieces" toggle is active — reasonable default, not
+// spec-mandated, tune visually.
+const INTERIOR_PIECE_DIMMED_OPACITY = 0.2;
+
 const CONTENT_MARGIN_FACTOR = 1.1;
 // Zoom bounds are relative to each Room's own fit-to-content scale, not an
 // absolute pixel value — Rooms vary widely in content extent (piece count,
@@ -257,6 +262,7 @@ function PieceSprite({
   onDragStart,
   onDragEnd,
   onClick,
+  dimmed,
 }: {
   piece: RoomDetailPiece;
   x: number;
@@ -270,6 +276,9 @@ function PieceSprite({
   onDragStart?: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd?: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onClick?: () => void;
+  // Story 3.16: dims a non-frame piece while the "highlight frame pieces"
+  // toggle is active — purely visual, never affects interaction below.
+  dimmed?: boolean;
 }) {
   const imageState = usePieceImage(piece.imageUrl);
 
@@ -307,6 +316,7 @@ function PieceSprite({
     onClick,
     onTap: onClick,
     clipFunc,
+    opacity: dimmed ? INTERIOR_PIECE_DIMMED_OPACITY : 1,
   };
 
   if (imageState.status === "loaded") {
@@ -411,6 +421,7 @@ function SoloPieceSprite({
   onDragEnd,
   onInstantFrameLockOutcome,
   onGenuineFusion,
+  highlightFramePieces,
 }: {
   piece: RoomDetailPiece;
   pieces: readonly RoomDetailPiece[];
@@ -427,6 +438,9 @@ function SoloPieceSprite({
   onDragEnd: () => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
   onGenuineFusion: (prediction: PredictedFusion) => void;
+  // Story 3.16: dims this piece (via `PieceSprite`'s own `dimmed` prop)
+  // whenever it's not a frame piece and the toggle is active.
+  highlightFramePieces: boolean;
 }) {
   const [muted] = useSoundMuted();
   const { x: confirmedX, y: confirmedY } = pieceRenderPosition(
@@ -736,6 +750,7 @@ function SoloPieceSprite({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onClick={handleClick}
+      dimmed={highlightFramePieces && piece.shapeType === "interior"}
     />
   );
 }
@@ -765,6 +780,7 @@ function ClusterGroupSprite({
   onDragStart,
   onDragEnd,
   onInstantFrameLockOutcome,
+  highlightFramePieces,
 }: {
   cluster: RoomDetailCluster;
   members: RoomDetailPiece[];
@@ -781,6 +797,10 @@ function ClusterGroupSprite({
   onDragStart: () => void;
   onDragEnd: () => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
+  // Story 3.16: evaluated per member below, not once for the whole Cluster
+  // — a mixed Cluster (one frame piece + one interior piece fused together)
+  // is a normal case, since fusion is adjacency-based, not shape-based.
+  highlightFramePieces: boolean;
 }) {
   // Any member works as the one reported to the Server Action — its own
   // math recovers the Cluster's anchor from whichever member's own screen
@@ -1066,6 +1086,7 @@ function ClusterGroupSprite({
           gridRows={gridRows}
           gridCols={gridCols}
           draggable={false}
+          dimmed={highlightFramePieces && piece.shapeType === "interior"}
         />
       ))}
     </Group>
@@ -1193,11 +1214,16 @@ export type RoomCanvasProps = {
   room: RoomDetail;
   onReady?: () => void;
   ref?: Ref<RoomCanvasHandle>;
+  // Story 3.16: lifted to `RoomView` (not internal state, unlike pan/zoom)
+  // since the "highlight frame pieces" button's own styling must reflect
+  // this value — see the story's own Dev Notes for why this is a plain
+  // prop rather than an imperative-handle method like `recenter()`.
+  highlightFramePieces: boolean;
 };
 
 // React 19 accepts `ref` as an ordinary prop on function components — no
 // `forwardRef` needed (that API is legacy now that this project is on 19.2).
-export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
+export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCanvasProps) {
   // Fires once, on mount — past the dynamic import's own "Loading canvas…"
   // placeholder. AC #1 of Story 3.2 gates the first-access tutorial on
   // this, not on every individual piece tile finishing its own load (Story
@@ -1925,6 +1951,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
                 onDragEnd={() => setDraggingKey(null)}
                 onInstantFrameLockOutcome={triggerPulse}
                 onGenuineFusion={addPredictedFusion}
+                highlightFramePieces={highlightFramePieces}
               />
             ) : (
               <ClusterGroupSprite
@@ -1947,6 +1974,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
                 }}
                 onDragEnd={() => setDraggingKey(null)}
                 onInstantFrameLockOutcome={triggerPulse}
+                highlightFramePieces={highlightFramePieces}
               />
             ),
           )}

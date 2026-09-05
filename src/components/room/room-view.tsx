@@ -7,6 +7,7 @@ import type { RoomCanvasHandle } from "@/components/canvas/room-canvas";
 import { RecenterButton } from "@/components/canvas/recenter-button";
 import { SoundMuteButton } from "@/components/canvas/sound-mute-button";
 import { ReferenceImageButton } from "@/components/canvas/reference-image-button";
+import { HighlightFramePiecesButton } from "@/components/canvas/highlight-frame-pieces-button";
 import { FirstAccessTutorial } from "@/components/room/first-access-tutorial";
 
 // Coordinates the "once the Canvas loads" part of AC #1 (Story 3.2): the
@@ -26,16 +27,30 @@ export function RoomView({
 }) {
   const [canvasReady, setCanvasReady] = useState(false);
   const canvasRef = useRef<RoomCanvasHandle>(null);
+  // Story 3.16: lifted here, not internal to `RoomCanvas` — unlike
+  // `recenter()`'s one-shot imperative call, this button's own styling must
+  // reflect the current on/off state, which a plain prop handles more
+  // simply than extending the imperative-handle pattern with a getter.
+  const [highlightFramePieces, setHighlightFramePieces] = useState(false);
 
   return (
     <>
-      <RoomCanvasClient ref={canvasRef} room={room} onReady={() => setCanvasReady(true)} />
+      <RoomCanvasClient
+        ref={canvasRef}
+        room={room}
+        onReady={() => setCanvasReady(true)}
+        highlightFramePieces={highlightFramePieces}
+      />
       <RecenterButton
         onClick={() => canvasRef.current?.recenter()}
         disabled={!canvasReady}
       />
       <SoundMuteButton />
       <ReferenceImageButton referenceImageUrl={room.referenceImageUrl} />
+      <HighlightFramePiecesButton
+        active={highlightFramePieces}
+        onToggle={() => setHighlightFramePieces((value) => !value)}
+      />
       {isGuest && <FirstAccessTutorial roomSlug={roomSlug} canvasReady={canvasReady} />}
     </>
   );
