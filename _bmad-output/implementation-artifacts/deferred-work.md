@@ -52,6 +52,7 @@
 ## Deferred: Home thumbnail for upload-sourced Rooms (2026-08-17)
 
 - Home now shows the real cover image for library-sourced Rooms (public static asset, trivial). Rooms created from a personal photo upload still show the gradient placeholder — no whole-image "cover" is persisted anywhere accessible (only sliced tiles exist, in the private `piece-tiles` bucket). Proper fix: upload an additional resized cover image (public or signed-URL-accessible) during Room creation (Story 2.4's pipeline) [src/app/room-list.tsx, src/lib/rooms/actions.ts]
+- **Update (2026-09-05):** Story 3.14 is about to persist exactly this — a resized reference image at `${roomId}/reference.webp` for upload-sourced Rooms — for a different feature (press-and-hold full view while building). Once that lands, `RoomThumbnail` (`src/app/room-list.tsx`) should be revisited to use the same asset instead of its gradient placeholder — noted explicitly per user request, not attempted as part of Story 3.14 itself.
 
 ## Deferred from: code review of story-3-1-join-a-room-as-a-guest (2026-08-21)
 
