@@ -6,6 +6,7 @@ import { RoomCanvasClient } from "@/components/canvas/room-canvas-loader";
 import type { RoomCanvasHandle } from "@/components/canvas/room-canvas";
 import { RecenterButton } from "@/components/canvas/recenter-button";
 import { SoundMuteButton } from "@/components/canvas/sound-mute-button";
+import { ReferenceImageButton } from "@/components/canvas/reference-image-button";
 import { FirstAccessTutorial } from "@/components/room/first-access-tutorial";
 
 // Coordinates the "once the Canvas loads" part of AC #1 (Story 3.2): the
@@ -34,6 +35,7 @@ export function RoomView({
         disabled={!canvasReady}
       />
       <SoundMuteButton />
+      <ReferenceImageButton referenceImageUrl={room.referenceImageUrl} />
       {isGuest && <FirstAccessTutorial roomSlug={roomSlug} canvasReady={canvasReady} />}
     </>
   );

@@ -3,6 +3,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { pgPool } from "@/lib/db/pg";
 import { getSupabaseEnv } from "@/lib/auth/env";
 import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
+import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
 
 const STORAGE_BUCKET = "piece-tiles";
 const SIGNED_URL_EXPIRES_IN_SECONDS = 60 * 60; // 1 hour, arbitrary — revisit if too short/long
@@ -62,6 +63,11 @@ export type RoomDetail = {
   tileHeight: number;
   pieces: RoomDetailPiece[];
   clusters: RoomDetailCluster[];
+  // Story 3.14: the puzzle's full source image, for the press-and-hold
+  // reference view. `null` for a Room created before this story shipped
+  // (upload-sourced, no `reference.webp` ever persisted for it) — the
+  // button degrades to disabled rather than the page failing to load.
+  referenceImageUrl: string | null;
 };
 
 /**
@@ -74,7 +80,7 @@ export type RoomDetail = {
  */
 export async function getRoomBySlug(slug: string): Promise<RoomDetail | null> {
   const roomResult = await pgPool.query(
-    `select id, name, grid_rows, grid_cols, tile_width, tile_height
+    `select id, name, grid_rows, grid_cols, tile_width, tile_height, image_source, image_library_id
      from room
      where invite_slug = $1`,
     [slug],
@@ -144,6 +150,11 @@ export async function getRoomBySlug(slug: string): Promise<RoomDetail | null> {
     version: row.version,
   }));
 
+  const referenceImageUrl =
+    room.image_source === "library"
+      ? LIBRARY_IMAGES.find((entry) => entry.id === room.image_library_id)?.src ?? null
+      : await resolveUploadReferenceImageUrl(supabase, room.id);
+
   return {
     id: room.id,
     name: room.name,
@@ -153,5 +164,24 @@ export async function getRoomBySlug(slug: string): Promise<RoomDetail | null> {
     tileHeight: room.tile_height,
     pieces,
     clusters,
+    referenceImageUrl,
   };
+}
+
+/**
+ * Signed URL for an upload-sourced Room's persisted `reference.webp`
+ * (Story 3.14) — which, for a Room created before this story shipped,
+ * never exists: `createSignedUrl` against a missing object returns an
+ * `error`, not a thrown exception, so this resolves to `null` rather than
+ * letting a missing reference image break loading the Room.
+ */
+async function resolveUploadReferenceImageUrl(
+  supabase: { storage: ReturnType<typeof createSupabaseClient>["storage"] },
+  roomId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(`${roomId}/reference.webp`, SIGNED_URL_EXPIRES_IN_SECONDS);
+
+  return error ? null : data.signedUrl;
 }

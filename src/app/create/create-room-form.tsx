@@ -13,9 +13,13 @@ import {
 } from "@/lib/rooms/is-resolution-sufficient";
 import { PIECE_COUNT_OPTIONS } from "@/lib/rooms/piece-count-options";
 import { computeGridDimensions } from "@/lib/piece-cutting/compute-grid-dimensions";
-import { sliceImageIntoTiles } from "@/lib/piece-cutting/slice-image";
+import { createReferenceImageBlob, sliceImageIntoTiles } from "@/lib/piece-cutting/slice-image";
 import { createSeededRotations, createSeededScatter } from "@/lib/piece-cutting/seeded-scatter";
-import { removePieceTiles, uploadPieceTiles } from "@/lib/rooms/upload-piece-tiles";
+import {
+  removePieceTiles,
+  uploadPieceTiles,
+  uploadReferenceImage,
+} from "@/lib/rooms/upload-piece-tiles";
 import { createRoom, type CreateRoomPieceInput } from "@/lib/rooms/actions";
 
 type SubmitStage = "idle" | "slicing" | "uploading" | "saving";
@@ -185,6 +189,7 @@ export function CreateRoomForm() {
     // Room was genuinely created server-side (the bug reported in testing).
     startTransition(async () => {
       let uploadedTilePaths: string[] = [];
+      let uploadedReferencePath: string | null = null;
 
       try {
         const roomId = crypto.randomUUID();
@@ -202,6 +207,10 @@ export function CreateRoomForm() {
         );
 
         setSubmitStage("uploading");
+        if (selectedImage.kind === "upload") {
+          const referenceBlob = await createReferenceImageBlob(bitmap);
+          uploadedReferencePath = await uploadReferenceImage(roomId, referenceBlob);
+        }
         const tilePaths = await uploadPieceTiles(roomId, tiles, { rows, cols });
         uploadedTilePaths = tilePaths;
 
@@ -247,8 +256,11 @@ export function CreateRoomForm() {
 
         if (!result.success) {
           // Room row (and therefore the pieces) were never committed —
-          // don't leave the uploaded tiles behind as permanent orphans.
-          await removePieceTiles(uploadedTilePaths);
+          // don't leave the uploaded tiles (or reference image) behind as
+          // permanent orphans.
+          await removePieceTiles(
+            uploadedReferencePath ? [...uploadedTilePaths, uploadedReferencePath] : uploadedTilePaths,
+          );
           if (isMountedRef.current) {
             setSubmitError(result.error.message);
           }
@@ -264,7 +276,9 @@ export function CreateRoomForm() {
         }
       } catch (err) {
         console.error("Room creation failed:", err);
-        await removePieceTiles(uploadedTilePaths);
+        await removePieceTiles(
+          uploadedReferencePath ? [...uploadedTilePaths, uploadedReferencePath] : uploadedTilePaths,
+        );
         if (isMountedRef.current) {
           setSubmitError(tCreate("genericError"));
         }
