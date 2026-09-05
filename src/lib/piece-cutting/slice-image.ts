@@ -30,6 +30,42 @@ export type SlicedTiles = {
 // with `BUMP_PROFILES` if either changes.
 export const TILE_OVERHANG_FACTOR = 0.25;
 
+// Story 3.14: the long edge a persisted whole-image "reference" copy is
+// capped to, in pixels. Only used for the press-and-hold reference-image
+// view (never for piece geometry) — a full-resolution upload would be
+// wasteful to store and serve for a purely illustrative overlay. Reasonable
+// default, not spec-mandated, tune visually later.
+export const REFERENCE_IMAGE_MAX_DIMENSION = 2000;
+
+/**
+ * Draws `bitmap` scaled down (never up) so its long edge is at most
+ * `REFERENCE_IMAGE_MAX_DIMENSION`, and returns the result as a WebP blob.
+ * Used to persist a whole-image "reference" copy for upload-sourced Rooms
+ * (Story 3.14) — library-sourced Rooms already have an equivalent public
+ * asset and never need this.
+ */
+export async function createReferenceImageBlob(bitmap: ImageBitmap): Promise<Blob> {
+  const scale = Math.min(1, REFERENCE_IMAGE_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Could not get a 2D canvas context.");
+  }
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (result) => (result ? resolve(result) : reject(new Error("toBlob failed"))),
+      "image/webp",
+    );
+  });
+}
+
 export async function sliceImageIntoTiles(
   bitmap: ImageBitmap,
   rows: number,

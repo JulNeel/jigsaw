@@ -25,6 +25,25 @@ export async function removePieceTiles(paths: string[]): Promise<void> {
 }
 
 /**
+ * Uploads the resized whole-image "reference" copy (Story 3.14) for an
+ * upload-sourced Room, at a fixed, predictable path so `get-room-by-slug.ts`
+ * can generate a signed URL for it without any extra bookkeeping. Returns
+ * the storage path, mirroring `uploadPieceTiles`'s own return shape so
+ * callers can pass it to `removePieceTiles` for cleanup on a later failure.
+ */
+export async function uploadReferenceImage(roomId: string, blob: Blob): Promise<string> {
+  const supabase = createClient();
+  const path = `${roomId}/reference.webp`;
+  const { error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(path, blob, { contentType: "image/webp" });
+  if (error) {
+    throw new Error(`Failed to upload reference image ${path}: ${error.message}`);
+  }
+  return path;
+}
+
+/**
  * Uploads sliced tile blobs to Storage, client-side (AD-2 explicitly
  * permits Storage via the Supabase client SDK). Returns the storage paths
  * in the same row-major order as `tiles`/the grid — these become each
