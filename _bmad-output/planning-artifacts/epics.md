@@ -471,6 +471,22 @@ So that fusing pieces feels as instant and confident as placing one does (Story 
 
 **Note — scope decision (2026-09-04), confirmed with the user before this story was written:** this is the harder half of Story 3.6/3.11's own placement-feedback work, explicitly deferred at the time (`deferred-work.md`: "Fusion has no confirmed-broadcast counterpart") because it needs a genuinely different mechanism than a cosmetic pulse — the *cluster association itself* (dragging the pair as one unit) must exist locally before confirmation, not just a sound/visual acknowledgment (already shipped 2026-09-04, reusing the placement pulse). Recommended approach: a local-only "predicted fusion" override in `room-canvas.tsx` (same idiom as `pendingRestOverride`/`optimisticAnchor`), not a write to the currently-read-only `clusters` TanStack DB collection — see the story file's own Dev Notes for the full reasoning.
 
+### Story 3.14: See the reference image while building
+
+As a Participant,
+I want to glance at the full picture the puzzle is based on,
+So that I can figure out where a piece belongs, the way a physical puzzle's box lid lets me.
+
+**Acceptance Criteria:**
+
+**Given** any Room (library-sourced or created from an uploaded photo)
+**When** a Participant presses and holds a visible button, on desktop or mobile
+**Then** the puzzle's full reference image displays fullscreen for as long as the button is held, and disappears the instant it's released
+**And** releasing the pointer anywhere — even after dragging off the button while still held — hides the image; there is no stuck-open state
+**And** this is purely a transient, read-only view: it never blocks, delays, or otherwise interferes with the Canvas's own pan/zoom/drag state underneath
+
+**Note — scope decision (2026-09-05), confirmed with the user before this story was written:** a Room created from an *uploaded* personal photo currently has **no accessible whole image anywhere** — only individually-sliced piece tiles exist, in the private `piece-tiles` Storage bucket (the same pre-existing gap `deferred-work.md` already flagged for Home's own thumbnail, 2026-08-17, never fixed). This story fixes it for real: a resized reference image is persisted to Storage at Room-creation time for upload-sourced Rooms (library-sourced Rooms already have a public asset via `LIBRARY_IMAGES`, nothing new needed there). A **permanent, resizable desktop drawer** was considered and explicitly deferred — press-and-hold covers the actual need on both platforms with much less UI complexity; revisit as its own story only if real usage shows the need for it.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
