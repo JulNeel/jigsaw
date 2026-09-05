@@ -23,7 +23,16 @@ import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 // compte"). Room *creation* is gated (Story 2.1); playing is not.
 
 export type PieceActionResult =
-  | { success: true; version: number; placed?: boolean }
+  // `fused` mirrors `placed`'s own role from Story 3.11 (AC #4), for Story
+  // 3.13's own analogous case: it tells the client whether this specific
+  // write actually fused the dragged group with another piece/Cluster —
+  // never inferred from position/version, always the transaction's own
+  // ground truth (`repositionOrFuse`'s own return). Present whenever a
+  // reposition attempt happened at all (`movePiece`, and `placePiece`'s own
+  // fallback when a Frame lock didn't validate) — absent only for actions
+  // that never call `repositionOrFuse` (`rotatePiece`, and `placePiece`'s
+  // successful-lock path, which never attempts a fusion).
+  | { success: true; version: number; placed?: boolean; fused?: boolean }
   | { success: false; error: { code: ErrorCode } };
 
 // Postgres's own SQLSTATE for `unique_violation` — the exact error a
@@ -338,7 +347,7 @@ async function repositionOrFuse(
   group: DraggedGroup,
   x: number,
   y: number,
-): Promise<number> {
+): Promise<{ version: number; fused: boolean }> {
   const newAnchorX = x - group.draggedMember.offsetCol * group.tileWidth;
   const newAnchorY = y - group.draggedMember.offsetRow * group.tileHeight;
   const draggedScreenMembers: ScreenPositioned[] = group.members.map((m) => ({
@@ -367,7 +376,7 @@ async function repositionOrFuse(
   );
 
   if (candidates.length === 0) {
-    return repositionPlain(client, group, x, y);
+    return { version: await repositionPlain(client, group, x, y), fused: false };
   }
 
   const trueNeighborsByPieceId = await loadTrueNeighborSets(
@@ -376,7 +385,7 @@ async function repositionOrFuse(
   );
   const genuine = validateFusion(candidates, trueNeighborsByPieceId);
   if (!genuine) {
-    return repositionPlain(client, group, x, y);
+    return { version: await repositionPlain(client, group, x, y), fused: false };
   }
 
   // Fuse: gather every distinct touched group's full membership, not just
@@ -410,11 +419,11 @@ async function repositionOrFuse(
     tolerance,
   );
   if (freshCandidates.length === 0) {
-    return repositionPlain(client, group, x, y);
+    return { version: await repositionPlain(client, group, x, y), fused: false };
   }
   const stillGenuine = validateFusion(freshCandidates, trueNeighborsByPieceId);
   if (!stillGenuine) {
-    return repositionPlain(client, group, x, y);
+    return { version: await repositionPlain(client, group, x, y), fused: false };
   }
 
   for (const row of touchedResult.rows) {
@@ -495,7 +504,7 @@ async function repositionOrFuse(
   const versionResult = await client.query(`select version from piece where id = $1`, [
     group.draggedMember.pieceId,
   ]);
-  return versionResult.rows[0].version;
+  return { version: versionResult.rows[0].version, fused: true };
 }
 
 /**
@@ -528,9 +537,9 @@ export async function movePiece(input: {
       return { success: false, error: { code: ERROR_CODES.ALREADY_PLACED } };
     }
 
-    const version = await repositionOrFuse(client, loaded.group, input.x, input.y);
+    const { version, fused } = await repositionOrFuse(client, loaded.group, input.x, input.y);
     await client.query("COMMIT");
-    return { success: true, version };
+    return { success: true, version, fused };
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("movePiece failed:", err);
@@ -647,7 +656,7 @@ export async function placePiece(input: {
     const { group } = loaded;
 
     async function restWithoutLocking(): Promise<PieceActionResult> {
-      const version = await repositionOrFuse(client, group, input.x, input.y);
+      const { version, fused } = await repositionOrFuse(client, group, input.x, input.y);
       await client.query("COMMIT");
       // Story 3.11: `placed: false` on every path through here — this
       // write succeeded (the piece/Cluster rests somewhere valid, possibly
@@ -655,7 +664,10 @@ export async function placePiece(input: {
       // uses this to tell an *ordinary, expected* non-lock (it predicted
       // the same outcome) from a *genuine, rare* disagreement (it predicted
       // a lock and got this instead) — see `collections.ts`'s `onUpdate`.
-      return { success: true, version, placed: false };
+      // `fused` (Story 3.13) is the analogous signal for the optimistic-
+      // fusion prediction — a Frame-slot drop that didn't lock can still
+      // genuinely fuse with a neighbor instead of just resting loose.
+      return { success: true, version, placed: false, fused };
     }
 
     const anchorTargetRow = input.targetRow - group.draggedMember.offsetRow;

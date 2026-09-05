@@ -26,6 +26,10 @@ import {
 import { emitPiecePlaced } from "@/lib/rooms/piece-placement-events";
 import { emitMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
+  consumeAndCheckPredictedFusion,
+  emitFusionConflict,
+} from "@/lib/rooms/predicted-fusion-events";
+import {
   emitFrameComplete,
   shouldFireFrameComplete,
 } from "@/lib/rooms/frame-completion-events";
@@ -409,6 +413,17 @@ export function createRoomCollections({
       const wasPredictedLock = changes.placedRow != null && consumeAndCheckPredictedLock(pieceId);
       if (wasPredictedLock && result.placed === false) {
         emitPlacementConflict();
+      }
+
+      // Story 3.13: the analogous "did the client expect this to work"
+      // check for a predicted-genuine fusion — `consumeAndCheckPredictedFusion`
+      // is drained unconditionally (same "success or failure, every time"
+      // reasoning as `wasPredictedLock` just above), and only a genuine
+      // disagreement (predicted a fusion, `result.fused === false`) tells
+      // `room-canvas.tsx` to stop trusting its optimistic grouping.
+      const predictedFusionTempClusterId = consumeAndCheckPredictedFusion(pieceId);
+      if (predictedFusionTempClusterId && result.fused === false) {
+        emitFusionConflict(predictedFusionTempClusterId);
       }
 
       // AD-1's core rule: never resolve from the Server Action's own

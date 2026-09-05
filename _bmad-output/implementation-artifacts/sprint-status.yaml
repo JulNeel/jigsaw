@@ -75,7 +75,7 @@ development_status:
   3-10-work-on-multiple-clusters-in-parallel: done
   3-11-instant-client-side-placement-prediction: done
   3-12-real-puzzle-piece-cut-shape: done
-  3-13-optimistic-fusion: ready-for-dev
+  3-13-optimistic-fusion: review
   epic-3-retrospective: optional
 
   epic-4: backlog
