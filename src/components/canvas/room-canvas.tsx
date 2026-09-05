@@ -19,6 +19,10 @@ import { createRoomCollections } from "@/lib/db/collections";
 import { markPredictedLock, subscribePlacementConflict } from "@/lib/rooms/placement-conflict-events";
 import { subscribeMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
+  markPredictedFusion,
+  subscribeFusionConflict,
+} from "@/lib/rooms/predicted-fusion-events";
+import {
   consumeAndCheckInstantPlacementFeedbackShown,
   markInstantPlacementFeedbackShown,
   subscribePiecePlaced,
@@ -370,6 +374,25 @@ function PieceSprite({
   );
 }
 
+// Story 3.13: a purely local, never-persisted "predicted fusion" — two
+// (currently only ever exactly two, see `SoloPieceSprite`'s own fusion
+// branch) pieces a client-side prediction already believes just fused,
+// rendered and draggable as one Îlot immediately, before the server's
+// confirmed `cluster_id` arrives. Deliberately never written to the
+// `clusters` TanStack DB collection (read-only from the client by design —
+// see `collections.ts`'s own comment) — kept entirely in `RoomCanvas`'s own
+// state instead, mirroring `pendingRestOverride`/`optimisticAnchor`'s own
+// "local-only override" idiom. Module-level (not declared inside
+// `RoomCanvas`) so `SoloPieceSprite` — a separate component, receiving this
+// only through a callback prop — can reference the same type.
+type PredictedFusion = {
+  tempClusterId: string;
+  memberIds: readonly [string, string];
+  anchorX: number;
+  anchorY: number;
+  offsetsByPieceId: ReadonlyMap<string, { row: number; col: number }>;
+};
+
 // An unclustered piece — placed (locked into the Frame, never draggable
 // again) or free-floating (scatter position, fully draggable).
 function SoloPieceSprite({
@@ -387,6 +410,7 @@ function SoloPieceSprite({
   onDragStart,
   onDragEnd,
   onInstantFrameLockOutcome,
+  onGenuineFusion,
 }: {
   piece: RoomDetailPiece;
   pieces: readonly RoomDetailPiece[];
@@ -402,6 +426,7 @@ function SoloPieceSprite({
   onDragStart: () => void;
   onDragEnd: () => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
+  onGenuineFusion: (prediction: PredictedFusion) => void;
 }) {
   const [muted] = useSoundMuted();
   const { x: confirmedX, y: confirmedY } = pieceRenderPosition(
@@ -594,7 +619,7 @@ function SoloPieceSprite({
       // fusion decision is still made exclusively server-side (`movePiece`
       // → `repositionOrFuse`), this is purely cosmetic prediction, same
       // spirit as `predictFrameLock`.
-      const fusionOutcome = predictFusionOutcome({
+      const { outcome: fusionOutcome, candidates: fusionCandidates } = predictFusionOutcome({
         draggedMembers: [
           {
             pieceId: piece.id,
@@ -629,12 +654,49 @@ function SoloPieceSprite({
         // green pulse does, until the server's confirmed `cluster_id`
         // eventually re-renders the pair as a `ClusterGroupSprite` —
         // noticeably later than the sound. This reuses that exact same
-        // pulse mechanism, purely cosmetic: it does not make the pair
-        // draggable as one unit before confirmation (a bigger, separately-
-        // tracked gap, see deferred-work.md's "Fusion has no confirmed-
-        // broadcast counterpart"), only acknowledges the connection
-        // instantly, the same way placement's own pulse does.
+        // pulse mechanism, purely cosmetic acknowledgment.
         onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
+
+        // Story 3.13: the actual optimistic *grouping* (drag the pair as
+        // one Îlot immediately) — deliberately scoped to the simplest,
+        // most common case: this piece fusing with exactly one other
+        // *solo* piece. A dragged Cluster, or a stationary piece already
+        // part of a Cluster, needs re-basing every existing member's own
+        // offset (`repositionOrFuse`'s own multi-member merge math) —
+        // deliberately out of scope here (this story's own Task 4
+        // allowance); those cases still get the pulse/chime above, just
+        // not the grouped-drag behavior yet.
+        const matchedStationaryId = fusionCandidates[0]?.b.pieceId;
+        const matchedStationaryPiece =
+          fusionCandidates.length === 1 && matchedStationaryId
+            ? pieces.find((p) => p.id === matchedStationaryId)
+            : undefined;
+        if (matchedStationaryPiece && matchedStationaryPiece.clusterId == null) {
+          const minGridRow = Math.min(piece.gridRow, matchedStationaryPiece.gridRow);
+          const minGridCol = Math.min(piece.gridCol, matchedStationaryPiece.gridCol);
+          const tempClusterId = crypto.randomUUID();
+          onGenuineFusion({
+            tempClusterId,
+            memberIds: [piece.id, matchedStationaryPiece.id],
+            // Mirrors `repositionOrFuse`'s own `mergedAnchorX/Y` formula
+            // exactly (`x - (draggedMember.gridCol - minGridCol) *
+            // tileWidth`, and the row equivalent) — `piece` is the
+            // dragged member here, at `dropPoint`.
+            anchorX: dropPoint.x - (piece.gridCol - minGridCol) * tileWidth,
+            anchorY: dropPoint.y - (piece.gridRow - minGridRow) * tileHeight,
+            offsetsByPieceId: new Map([
+              [piece.id, { row: piece.gridRow - minGridRow, col: piece.gridCol - minGridCol }],
+              [
+                matchedStationaryPiece.id,
+                {
+                  row: matchedStationaryPiece.gridRow - minGridRow,
+                  col: matchedStationaryPiece.gridCol - minGridCol,
+                },
+              ],
+            ]),
+          });
+          markPredictedFusion(piece.id, tempClusterId);
+        }
       }
       collection.update(piece.id, (draft) => {
         draft.scatterX = dropPoint.x;
@@ -775,15 +837,39 @@ function ClusterGroupSprite({
   // explicit signal (`move-conflict-events.ts`) fired only when this
   // piece's `movePiece` call actually fails — see its own comment for the
   // full reasoning.
+  //
+  // That fix still left one gap, found the same day on a second report: the
+  // *version* comparison itself has the exact same class of bug, just one
+  // level up. `sinceVersion` used to be read straight from `cluster.version`
+  // at drag-end — which stays stale (unconfirmed) across several rapid
+  // drags fired before the first one's own confirmation lands, so every one
+  // of them captures the *same* stale `sinceVersion`. The first of several
+  // confirmations to arrive (for the *earliest*, already-superseded drag)
+  // then satisfies `cluster.version > sinceVersion` prematurely, falling
+  // back to that earlier drag's own confirmed anchor — replaying through
+  // every intermediate position again as each subsequent confirmation
+  // arrives, before finally settling on the last one. `speculativeVersionRef`
+  // advances the floor the instant each drag is *dispatched* (mirroring
+  // `collections.ts`'s own `ownLastKnownVersionByPieceId` for the same
+  // reason), so `sinceVersion` always reflects what *this specific* drag's
+  // own write will produce, not whatever the client happened to have seen
+  // last.
+  const speculativeVersionRef = useRef<number | null>(null);
   useEffect(() => {
     return subscribeMoveConflict((pieceId) => {
       if (pieceId === representativeMember.id) {
         setOptimisticAnchor(null);
+        // This client's speculative chain just proved wrong for at least
+        // one link — forget it rather than risk a permanently-inflated
+        // floor that could never be satisfied by the real confirmed
+        // version again. The next drag simply re-floors from the live
+        // `cluster.version` instead.
+        speculativeVersionRef.current = null;
       }
     });
   }, [representativeMember.id]);
   const anchor =
-    optimisticAnchor && cluster.version <= optimisticAnchor.sinceVersion
+    optimisticAnchor && cluster.version < optimisticAnchor.sinceVersion
       ? optimisticAnchor
       : { x: cluster.anchorX, y: cluster.anchorY };
 
@@ -798,7 +884,16 @@ function ClusterGroupSprite({
       x: groupAnchor.x + representativeMember.clusterOffsetCol! * tileWidth,
       y: groupAnchor.y + representativeMember.clusterOffsetRow! * tileHeight,
     };
-    setOptimisticAnchor({ ...groupAnchor, sinceVersion: cluster.version });
+    // Floors at whichever is more recent: the live confirmed version, or
+    // this client's own still-unconfirmed speculative chain from an
+    // earlier rapid drag — see `speculativeVersionRef`'s own comment.
+    // `sinceVersion` holds the *result* version this specific drag expects
+    // once confirmed (not the pre-write version), matching `anchor`'s own
+    // `<` comparison above.
+    const baseVersion = Math.max(cluster.version, speculativeVersionRef.current ?? 0);
+    const expectedResultVersion = baseVersion + 1;
+    speculativeVersionRef.current = expectedResultVersion;
+    setOptimisticAnchor({ ...groupAnchor, sinceVersion: expectedResultVersion });
     // Generic "piece released" sound — every drop, anywhere on the Canvas,
     // exactly as for a solo piece (`SoloPieceSprite`'s handleDragEnd).
     if (!muted) {
@@ -892,7 +987,18 @@ function ClusterGroupSprite({
       // Not near a Frame slot — same cosmetic-only fusion-outcome check as
       // `SoloPieceSprite`, applied to every member of the Cluster at once.
       const memberIds = new Set(members.map((m) => m.id));
-      const fusionOutcome = predictFusionOutcome({
+      // Story 3.13: only the pulse/chime acknowledgment below is
+      // instant here — the optimistic *grouping* behavior is deliberately
+      // scoped to a solo piece fusing with exactly one other solo piece
+      // (see `SoloPieceSprite`'s own fusion branch); dragging an *existing*
+      // Cluster into a new fusion would need re-basing every current
+      // member's own offset through the same multi-member merge math
+      // `repositionOrFuse` does server-side, which is out of scope for this
+      // story (its own Task 4 explicitly allows deferring the compounding
+      // case). The confirmed fusion still arrives normally via Realtime,
+      // just without the immediate grouped-drag feedback in this specific
+      // case.
+      const { outcome: fusionOutcome } = predictFusionOutcome({
         draggedMembers: members.map((m) => ({
           pieceId: m.id,
           gridRow: m.gridRow,
@@ -1338,11 +1444,80 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
     });
   }, [muted, t]);
 
+  // Story 3.13: a purely local, never-persisted "predicted fusion" — two
+  // (currently only ever exactly two — see its own comment below) pieces a
+  // client-side prediction already believes just fused, rendered and
+  // draggable as one Îlot immediately, before the server's confirmed
+  // `cluster_id` arrives. Deliberately never written to the `clusters`
+  // TanStack DB collection (read-only from the client by design — see
+  // `collections.ts`'s own comment) — kept entirely in this component's
+  // state instead, mirroring `pendingRestOverride`/`optimisticAnchor`'s
+  // own "local-only override" idiom.
+  const [predictedFusions, setPredictedFusions] = useState<readonly PredictedFusion[]>([]);
+
+  // A prediction is "confirmed" once every member's *real* `clusterId`
+  // agrees and actually resolves to a loaded Cluster row — Realtime has
+  // caught up, so the synthetic grouping this prediction guessed now exists
+  // for real. Checked as a plain derived value at render time, never via an
+  // effect + `setState` — matching this codebase's own established lesson
+  // (Story 3.10, twice; the "derived at render time" comment a few lines
+  // below on `scale`/`position`) that syncing external data into state with
+  // an effect is the anti-pattern here, not the fix, whenever the answer is
+  // directly computable from data already in hand.
+  function isFusionConfirmed(pf: PredictedFusion): boolean {
+    const realClusterIds = new Set(
+      pf.memberIds.map((id) => pieces.find((p) => p.id === id)?.clusterId ?? null),
+    );
+    return (
+      realClusterIds.size === 1 && !realClusterIds.has(null) && clustersById.has([...realClusterIds][0]!)
+    );
+  }
+  // Confirmed predictions are dropped from `predictedFusions` opportunistically
+  // (the next time a *new* fusion happens, itself a genuine event, not a
+  // reactive effect) rather than left to accumulate for the Room's entire
+  // session — `activePredictedFusions` below is what every render actually
+  // uses, so a confirmed-but-not-yet-pruned entry has zero effect on
+  // rendering in the meantime regardless.
+  const addPredictedFusion = (prediction: PredictedFusion) => {
+    setPredictedFusions((prev) => [...prev.filter((pf) => !isFusionConfirmed(pf)), prediction]);
+  };
+  const activePredictedFusions = predictedFusions.filter((pf) => !isFusionConfirmed(pf));
+
+  // The server's own re-validation rarely disagreeing with a "genuine"
+  // prediction (`predicted-fusion-events.ts`) is the only other way a
+  // prediction ever needs to go away — undoing it immediately rather than
+  // leaving the pair visually merged but wrong. A genuine external signal
+  // to subscribe to, unlike the confirmation check above — this is the
+  // legitimate use of an effect here, not the anti-pattern.
+  useEffect(() => {
+    return subscribeFusionConflict((tempClusterId) => {
+      setPredictedFusions((prev) => prev.filter((pf) => pf.tempClusterId !== tempClusterId));
+    });
+  }, []);
+
+  const { predictedClusterIdByPieceId, predictedClustersById } = useMemo(() => {
+    const byPieceId = new Map<string, string>();
+    const byId = new Map<string, RoomDetailCluster>();
+    for (const pf of activePredictedFusions) {
+      for (const pieceId of pf.memberIds) {
+        byPieceId.set(pieceId, pf.tempClusterId);
+      }
+      // `version: -1` is never compared against anything real for this
+      // synthetic row — it only needs to satisfy `RoomDetailCluster`'s type.
+      byId.set(pf.tempClusterId, { id: pf.tempClusterId, anchorX: pf.anchorX, anchorY: pf.anchorY, version: -1 });
+    }
+    return { predictedClusterIdByPieceId: byPieceId, predictedClustersById: byId };
+  }, [activePredictedFusions]);
+
   // Split once per render into "renders alone" vs "renders inside its
   // Cluster's Group" — a piece with a `clusterId` that doesn't (yet) match
   // a loaded Cluster row is a one-render sync gap (piece update arriving
   // just ahead of its Cluster's), not a real state; it's excluded from
-  // both until the Cluster row itself arrives.
+  // both until the Cluster row itself arrives. A solo piece covered by an
+  // active `predictedFusions` entry (Story 3.13) is grouped under that
+  // prediction's own temporary id instead of rendering alone — the real
+  // `clusterId` branch above always wins once it's genuinely confirmed, so
+  // this can never contradict real data, only anticipate it.
   const { soloPieces, membersByClusterId } = useMemo(() => {
     const solo: RoomDetailPiece[] = [];
     const byCluster = new Map<string, RoomDetailPiece[]>();
@@ -1351,12 +1526,31 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
         const members = byCluster.get(piece.clusterId) ?? [];
         members.push(piece);
         byCluster.set(piece.clusterId, members);
+      } else if (piece.clusterId == null && predictedClusterIdByPieceId.has(piece.id)) {
+        const tempClusterId = predictedClusterIdByPieceId.get(piece.id)!;
+        const predicted = activePredictedFusions.find((pf) => pf.tempClusterId === tempClusterId)!;
+        const offset = predicted.offsetsByPieceId.get(piece.id)!;
+        // A clone, not the live piece — `ClusterGroupSprite` reads
+        // `clusterOffsetRow`/`clusterOffsetCol` directly off each member,
+        // and the real piece's own fields are still `null` until the
+        // server actually confirms the fusion. Only rendering reads this
+        // clone; `collection.update(representativeMember.id, ...)` still
+        // targets the real piece by `id`, which the clone preserves.
+        const patched: RoomDetailPiece = {
+          ...piece,
+          clusterId: tempClusterId,
+          clusterOffsetRow: offset.row,
+          clusterOffsetCol: offset.col,
+        };
+        const members = byCluster.get(tempClusterId) ?? [];
+        members.push(patched);
+        byCluster.set(tempClusterId, members);
       } else if (piece.clusterId == null) {
         solo.push(piece);
       }
     }
     return { soloPieces: solo, membersByClusterId: byCluster };
-  }, [pieces, clustersById]);
+  }, [pieces, clustersById, predictedClusterIdByPieceId, activePredictedFusions]);
 
   // Measures the actual wrapping container (not `window.innerWidth/Height`,
   // which can differ from it — desktop scrollbar gutter, mobile browser
@@ -1453,7 +1647,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
       ...soloPieces.map(
         (piece): RenderItem => ({ type: "solo", key: piece.id, pieceIds: [piece.id], piece }),
       ),
-      ...clusters.flatMap((cluster): RenderItem[] => {
+      ...[...clusters, ...predictedClustersById.values()].flatMap((cluster): RenderItem[] => {
         const members = membersByClusterId.get(cluster.id);
         return members
           ? [
@@ -1475,7 +1669,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
     const bestRank = (item: RenderItem) =>
       Math.max(-1, ...item.pieceIds.map((pieceId) => rankByPieceId.get(pieceId) ?? -1));
     return [...items].sort((a, b) => bestRank(a) - bestRank(b));
-  }, [soloPieces, clusters, membersByClusterId, zOrder]);
+  }, [soloPieces, clusters, membersByClusterId, zOrder, predictedClustersById]);
 
   // Derived at render time, not synced via an effect: `scale`/`position`
   // state can go stale relative to `minScale`/`maxScale`/`contentHalfExtent`
@@ -1730,6 +1924,7 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
                 }}
                 onDragEnd={() => setDraggingKey(null)}
                 onInstantFrameLockOutcome={triggerPulse}
+                onGenuineFusion={addPredictedFusion}
               />
             ) : (
               <ClusterGroupSprite
