@@ -1896,9 +1896,17 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
       );
       if (velocity.x !== 0 || velocity.y !== 0) {
         const currentStagePos = stage.position();
+        // `velocity` points in the direction the *view* should reveal more
+        // content (e.g. positive x = pointer near the right edge = "show me
+        // what's further right"). The Stage's own position is where
+        // content-space (0,0) lands on screen — revealing more content to
+        // the right means shifting that anchor *left*, i.e. the Stage must
+        // move opposite to `velocity`, not with it (bug found in manual
+        // testing: without the minus sign, dragging toward an edge panned
+        // the view the wrong way).
         const proposedStagePos = {
-          x: currentStagePos.x + velocity.x * dt,
-          y: currentStagePos.y + velocity.y * dt,
+          x: currentStagePos.x - velocity.x * dt,
+          y: currentStagePos.y - velocity.y * dt,
         };
         const newStagePos = clampPosition(
           proposedStagePos,
