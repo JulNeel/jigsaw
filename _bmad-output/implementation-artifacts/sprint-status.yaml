@@ -62,7 +62,7 @@ development_status:
   2-4-create-the-room-and-get-a-shareable-invite-link: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   3-1-join-a-room-as-a-guest: done
   3-2-first-access-tutorial: done
   3-3-navigate-the-infinite-canvas: done
@@ -75,7 +75,7 @@ development_status:
   3-10-work-on-multiple-clusters-in-parallel: done
   3-11-instant-client-side-placement-prediction: done
   3-12-real-puzzle-piece-cut-shape: done
-  3-13-optimistic-fusion: review
+  3-13-optimistic-fusion: done
   epic-3-retrospective: optional
 
   epic-4: backlog

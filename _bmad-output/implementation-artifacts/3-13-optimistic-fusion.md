@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.13: Optimistic fusion
 
-Status: review
+Status: done
 
 ## Story
 
