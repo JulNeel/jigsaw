@@ -837,15 +837,39 @@ function ClusterGroupSprite({
   // explicit signal (`move-conflict-events.ts`) fired only when this
   // piece's `movePiece` call actually fails — see its own comment for the
   // full reasoning.
+  //
+  // That fix still left one gap, found the same day on a second report: the
+  // *version* comparison itself has the exact same class of bug, just one
+  // level up. `sinceVersion` used to be read straight from `cluster.version`
+  // at drag-end — which stays stale (unconfirmed) across several rapid
+  // drags fired before the first one's own confirmation lands, so every one
+  // of them captures the *same* stale `sinceVersion`. The first of several
+  // confirmations to arrive (for the *earliest*, already-superseded drag)
+  // then satisfies `cluster.version > sinceVersion` prematurely, falling
+  // back to that earlier drag's own confirmed anchor — replaying through
+  // every intermediate position again as each subsequent confirmation
+  // arrives, before finally settling on the last one. `speculativeVersionRef`
+  // advances the floor the instant each drag is *dispatched* (mirroring
+  // `collections.ts`'s own `ownLastKnownVersionByPieceId` for the same
+  // reason), so `sinceVersion` always reflects what *this specific* drag's
+  // own write will produce, not whatever the client happened to have seen
+  // last.
+  const speculativeVersionRef = useRef<number | null>(null);
   useEffect(() => {
     return subscribeMoveConflict((pieceId) => {
       if (pieceId === representativeMember.id) {
         setOptimisticAnchor(null);
+        // This client's speculative chain just proved wrong for at least
+        // one link — forget it rather than risk a permanently-inflated
+        // floor that could never be satisfied by the real confirmed
+        // version again. The next drag simply re-floors from the live
+        // `cluster.version` instead.
+        speculativeVersionRef.current = null;
       }
     });
   }, [representativeMember.id]);
   const anchor =
-    optimisticAnchor && cluster.version <= optimisticAnchor.sinceVersion
+    optimisticAnchor && cluster.version < optimisticAnchor.sinceVersion
       ? optimisticAnchor
       : { x: cluster.anchorX, y: cluster.anchorY };
 
@@ -860,7 +884,16 @@ function ClusterGroupSprite({
       x: groupAnchor.x + representativeMember.clusterOffsetCol! * tileWidth,
       y: groupAnchor.y + representativeMember.clusterOffsetRow! * tileHeight,
     };
-    setOptimisticAnchor({ ...groupAnchor, sinceVersion: cluster.version });
+    // Floors at whichever is more recent: the live confirmed version, or
+    // this client's own still-unconfirmed speculative chain from an
+    // earlier rapid drag — see `speculativeVersionRef`'s own comment.
+    // `sinceVersion` holds the *result* version this specific drag expects
+    // once confirmed (not the pre-write version), matching `anchor`'s own
+    // `<` comparison above.
+    const baseVersion = Math.max(cluster.version, speculativeVersionRef.current ?? 0);
+    const expectedResultVersion = baseVersion + 1;
+    speculativeVersionRef.current = expectedResultVersion;
+    setOptimisticAnchor({ ...groupAnchor, sinceVersion: expectedResultVersion });
     // Generic "piece released" sound — every drop, anywhere on the Canvas,
     // exactly as for a solo piece (`SoloPieceSprite`'s handleDragEnd).
     if (!muted) {
