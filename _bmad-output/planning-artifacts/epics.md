@@ -505,6 +505,23 @@ So that I can move a piece anywhere on the board without ever having to drop it,
 
 **Note — scope decision (2026-09-05), confirmed with the user before this story was written:** this only applies while an actual piece/Îlot is being dragged (`draggingKey`/`isPieceDragging`, already tracked in `room-canvas.tsx`) — dragging the empty Canvas itself to pan (Story 3.3) is already a deliberate, direct pan gesture and is explicitly out of scope here, unaffected by this story.
 
+### Story 3.16: Highlight the frame pieces
+
+As a Participant,
+I want a way to see at a glance which pieces are frame pieces (the ones that belong on the Frame's outer border),
+So that I can sort them out from the pile the way I would with a physical puzzle's edge pieces.
+
+**Acceptance Criteria:**
+
+**Given** a Room with any mix of loose, mid-drag, fused (Îlot), and Frame-locked pieces
+**When** a Participant activates the "highlight frame pieces" toggle button
+**Then** every piece that is *not* a frame piece (an "interior" piece, per the existing `PieceShapeType` grid-position classification) visually dims, while every corner/edge ("frame") piece stays at full visibility
+**And** deactivating the toggle (a second press) immediately restores every piece to full visibility
+**And** this is purely a client-side visual aid — it never affects placement/fusion validation, dragging, clicking, or any other interaction; a dimmed piece remains fully interactive
+**And** the button's own on/off state is clearly visible at a glance (e.g., a pressed/active visual state), and a piece arriving or changing via Realtime (moved, placed, or fused by another Participant) immediately respects whatever the toggle's current state already is, with no need to re-toggle
+
+**Note — scope decision (2026-09-05), confirmed with the user before this story was written:** interaction is a **toggle** (stays active until pressed again), not press-and-hold like Story 3.14's reference-image button — sorting out every frame piece from a pile is a task that takes real time, unlike a quick glance at the source image. The toggle's state is deliberately **not persisted** (resets to off on reload) — a transient work aid, not a durable preference like sound-mute; revisit only if real usage shows a need to persist it.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
