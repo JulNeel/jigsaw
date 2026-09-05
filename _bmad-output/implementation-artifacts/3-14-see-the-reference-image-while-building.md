@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.14: See the reference image while building
 
-Status: review
+Status: done
 
 ## Story
 
