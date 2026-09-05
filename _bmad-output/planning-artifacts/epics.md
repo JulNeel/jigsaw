@@ -487,6 +487,24 @@ So that I can figure out where a piece belongs, the way a physical puzzle's box 
 
 **Note — scope decision (2026-09-05), confirmed with the user before this story was written:** a Room created from an *uploaded* personal photo currently has **no accessible whole image anywhere** — only individually-sliced piece tiles exist, in the private `piece-tiles` Storage bucket (the same pre-existing gap `deferred-work.md` already flagged for Home's own thumbnail, 2026-08-17, never fixed). This story fixes it for real: a resized reference image is persisted to Storage at Room-creation time for upload-sourced Rooms (library-sourced Rooms already have a public asset via `LIBRARY_IMAGES`, nothing new needed there). A **permanent, resizable desktop drawer** was considered and explicitly deferred — press-and-hold covers the actual need on both platforms with much less UI complexity; revisit as its own story only if real usage shows the need for it.
 
+### Story 3.15: Auto-pan the Canvas while dragging a piece near the edge
+
+As a Participant,
+I want the Canvas to keep scrolling in the direction I'm dragging a piece toward, once I get close to the edge of my screen,
+So that I can move a piece anywhere on the board without ever having to drop it, re-grab it, and drag again.
+
+**Acceptance Criteria:**
+
+**Given** a Participant is dragging a piece or an Îlot (Cluster, Story 3.9/3.10)
+**When** the pointer/finger gets within a fixed margin of any edge of the visible Canvas viewport
+**Then** the Canvas pans continuously toward that edge for as long as the pointer stays within the margin, with no need to release the piece
+**And** the piece/Îlot being dragged stays visually anchored under the pointer throughout — it never drifts away from or detaches from the cursor while the Canvas is auto-panning underneath it
+**And** panning stops the instant the pointer moves back outside the margin, or the drag ends (drop/release), whichever happens first
+**And** auto-pan never scrolls the Canvas past the same bounds manual panning already respects (`clampPosition`/`PAN_MARGIN`, Story 3.3) — it can never make part of the board permanently unreachable
+**And** this works identically for a mouse drag (desktop) and a touch drag (mobile) — consistent with the rest of the Canvas's existing pointer handling
+
+**Note — scope decision (2026-09-05), confirmed with the user before this story was written:** this only applies while an actual piece/Îlot is being dragged (`draggingKey`/`isPieceDragging`, already tracked in `room-canvas.tsx`) — dragging the empty Canvas itself to pan (Story 3.3) is already a deliberate, direct pan gesture and is explicitly out of scope here, unaffected by this story.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
