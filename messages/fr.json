@@ -59,6 +59,7 @@
     "successBadge": "✓ Salon créé",
     "successHeading": "{name} est prêt",
     "successLead": "{pieceCount} pièces · partagez le lien pour que les vôtres rejoignent.",
+    "goToRoom": "Accéder au salon",
     "copyLink": "Copier",
     "linkCopied": "Copié !",
     "shareWhatsApp": "💬 WhatsApp",
@@ -69,7 +70,9 @@
     "notFoundTitle": "Salon introuvable",
     "notFoundBody": "Ce lien d'invitation est invalide ou a expiré. Vérifiez qu'il est correct, ou demandez-en un nouveau à la personne qui vous l'a envoyé.",
     "errorTitle": "Une erreur est survenue",
-    "errorBody": "Impossible de charger ce Salon pour le moment. Réessayez dans quelques instants."
+    "errorBody": "Impossible de charger ce Salon pour le moment. Réessayez dans quelques instants.",
+    "backToHomeAriaLabel": "Retour à l'accueil",
+    "signInAriaLabel": "Se connecter ou créer un compte"
   },
   "Tutorial": {
     "title": "Bienvenue dans le Salon",
