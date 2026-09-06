@@ -84,7 +84,20 @@ const CONTENT_MARGIN_FACTOR = 1.1;
 // verification if they feel off.
 const MIN_SCALE_FACTOR = 0.5;
 const MAX_SCALE_FACTOR = 8;
-const WHEEL_ZOOM_FACTOR = 1.05;
+// Continuous zoom sensitivity for Ctrl+wheel/trackpad-pinch (`handleWheel`)
+// — a browser sets `ctrlKey` on a `wheel` event both for an explicit
+// Ctrl+wheel and for a trackpad pinch gesture (deliberately, the only
+// reliable signal available to distinguish "pinch" from an ordinary
+// two-finger pan/mouse-wheel-scroll, which arrive identically otherwise).
+// Reasonable default, not spec-mandated — tune visually.
+const WHEEL_ZOOM_SENSITIVITY = 0.01;
+// Approximate px-per-line for a `DOM_DELTA_LINE` wheel event (a
+// traditional, notch-stepping mouse wheel) — a trackpad reports
+// `DOM_DELTA_PIXEL` directly (no scaling needed), while a line-stepping
+// mouse's own `deltaY` is a small integer per notch, which would otherwise
+// pan far slower than a trackpad's continuous pixel deltas. Reasonable
+// default (a common approximation), not spec-mandated.
+const WHEEL_PAN_LINE_HEIGHT_PX = 16;
 // Minimum sliver (px) of content guaranteed to stay reachable at any pan
 // extreme (AC #2 / NFR-1) — reasonable default, not spec-mandated.
 const PAN_MARGIN = 150;
@@ -1753,23 +1766,42 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
     setPosition(clampPosition(newPosition, newScale, stageSize, contentHalfExtent, PAN_MARGIN));
   }
 
+  // Figma/Miro convention (user-confirmed 2026-09-06, replacing "wheel
+  // always zooms"): a browser gives no reliable way to distinguish a
+  // physical mouse wheel from a trackpad two-finger swipe — both arrive as
+  // the same `wheel` event, no device-type flag. `ctrlKey` is the one
+  // signal every major browser *does* set reliably for both an explicit
+  // Ctrl+wheel and a trackpad pinch (deliberately, so web apps can tell a
+  // pinch apart from an ordinary pan) — so that's the only case that zooms
+  // now; a plain wheel/trackpad-swipe pans instead.
   function handleWheel(e: Konva.KonvaEventObject<WheelEvent>) {
     e.evt.preventDefault();
-    if (e.evt.deltaY === 0) {
-      // Horizontal-only scroll (e.g. a trackpad swipe) must not be treated
-      // as a zoom gesture at all.
+    if (e.evt.ctrlKey) {
+      const stage = e.target.getStage();
+      const pointer = stage?.getPointerPosition();
+      if (!pointer) {
+        return;
+      }
+      // Continuous exponential scaling, not a fixed per-event step — needs
+      // to feel right both for a real trackpad pinch (many small deltas
+      // per gesture) and an explicit Ctrl+mouse-wheel notch (one larger
+      // delta).
+      const zoomFactor = Math.exp(-e.evt.deltaY * WHEEL_ZOOM_SENSITIVITY);
+      applyZoom(pointer, clampedScale * zoomFactor);
       return;
     }
-    const stage = e.target.getStage();
-    const pointer = stage?.getPointerPosition();
-    if (!pointer) {
-      return;
-    }
-    const zoomingIn = e.evt.deltaY < 0;
-    applyZoom(
-      pointer,
-      zoomingIn ? clampedScale * WHEEL_ZOOM_FACTOR : clampedScale / WHEEL_ZOOM_FACTOR,
+    const deltaScale = e.evt.deltaMode === WheelEvent.DOM_DELTA_LINE ? WHEEL_PAN_LINE_HEIGHT_PX : 1;
+    const newPosition = clampPosition(
+      {
+        x: clampedPosition.x - e.evt.deltaX * deltaScale,
+        y: clampedPosition.y - e.evt.deltaY * deltaScale,
+      },
+      clampedScale,
+      stageSize,
+      contentHalfExtent,
+      PAN_MARGIN,
     );
+    setPosition(newPosition);
   }
 
   function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
