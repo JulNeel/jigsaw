@@ -43,6 +43,11 @@ import { computePieceEdgeShapes } from "@/lib/piece-cutting/compute-piece-edge-s
 import { buildPieceOutlinePath, drawPieceOutlinePath } from "@/lib/piece-cutting/build-piece-outline-path";
 import { TILE_OVERHANG_FACTOR } from "@/lib/piece-cutting/slice-image";
 import { clampPosition, clampScale, computeFitView, zoomAtPoint, type Point } from "./viewport-bounds";
+import {
+  computeAutoscrollVelocity,
+  EDGE_AUTOSCROLL_MARGIN_PX,
+  EDGE_AUTOSCROLL_MAX_SPEED_PX_PER_SEC,
+} from "./edge-autoscroll";
 
 // Status colors (2026-09-02, user feedback) — a deliberate departure from
 // DESIGN.md's brand palette (terracotta `primary`/gold `accent`, neither of
@@ -423,8 +428,8 @@ function SoloPieceSprite({
   gridRows: number;
   gridCols: number;
   collection: PieceCollection;
-  onDragStart: () => void;
-  onDragEnd: () => void;
+  onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
   onGenuineFusion: (prediction: PredictedFusion) => void;
 }) {
@@ -508,14 +513,14 @@ function SoloPieceSprite({
     if (!muted) {
       warmUpAudioContext();
     }
-    onDragStart();
+    onDragStart(e);
   }
 
   function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
     if (isPlaced) {
       return;
     }
-    onDragEnd();
+    onDragEnd(e);
     const dropPoint = { x: e.target.x(), y: e.target.y() };
     // Generic "piece released" sound — every drop, anywhere on the Canvas,
     // in the Frame or not, regardless of whether it also attempts (or
@@ -778,8 +783,8 @@ function ClusterGroupSprite({
   gridRows: number;
   gridCols: number;
   collection: PieceCollection;
-  onDragStart: () => void;
-  onDragEnd: () => void;
+  onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
 }) {
   // Any member works as the one reported to the Server Action — its own
@@ -874,7 +879,7 @@ function ClusterGroupSprite({
       : { x: cluster.anchorX, y: cluster.anchorY };
 
   function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
-    onDragEnd();
+    onDragEnd(e);
     const groupAnchor = { x: e.target.x(), y: e.target.y() };
     // The representative member's own actual screen position — not the
     // Group's raw anchor — since that's what the Server Action expects
@@ -1035,7 +1040,7 @@ function ClusterGroupSprite({
     }
   }
 
-  function handleDragStart() {
+  function handleDragStart(e: Konva.KonvaEventObject<DragEvent>) {
     // Same reasoning as `SoloPieceSprite`'s handleDragStart — warms up the
     // shared `AudioContext` for the whole drag's duration, not just at drop.
     // Skipped when muted (code review fix, 2026-09-02) — nothing to warm up
@@ -1043,7 +1048,7 @@ function ClusterGroupSprite({
     if (!muted) {
       warmUpAudioContext();
     }
-    onDragStart();
+    onDragStart(e);
   }
 
   return (
@@ -1849,6 +1854,120 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
 
   }, []);
 
+  // Story 3.15: edge-autoscroll while a piece/Îlot is being dragged near the
+  // viewport edge. `autoscrollNodeRef` is the dragged Konva node itself (a
+  // `SoloPieceSprite`/`ClusterGroupSprite`'s own `<Group>`) — started/
+  // stopped from their `onDragStart`/`onDragEnd`, independent of the Stage's
+  // own pan-drag (mutually exclusive with it, see `isPieceDragging` above).
+  // `autoscrollFrameRef` is the `requestAnimationFrame` handle; the loop
+  // keeps rescheduling itself for the whole duration of the drag regardless
+  // of whether the pointer is currently near an edge, since a piece drag
+  // has no other hook that fires while the pointer is held stationary.
+  const autoscrollFrameRef = useRef<number | null>(null);
+  const autoscrollNodeRef = useRef<Konva.Node | null>(null);
+  const autoscrollLastTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoscrollFrameRef.current != null) {
+        cancelAnimationFrame(autoscrollFrameRef.current);
+      }
+    };
+  }, []);
+
+  function autoscrollTick(timestamp: number) {
+    const stage = stageRef.current;
+    const node = autoscrollNodeRef.current;
+    if (!stage || !node) {
+      autoscrollFrameRef.current = null;
+      return;
+    }
+    const pointer = stage.getPointerPosition();
+    const lastTimestamp = autoscrollLastTimeRef.current;
+    const dt = lastTimestamp == null ? 0 : (timestamp - lastTimestamp) / 1000;
+    autoscrollLastTimeRef.current = timestamp;
+
+    if (pointer) {
+      const velocity = computeAutoscrollVelocity(
+        pointer,
+        stageSize,
+        EDGE_AUTOSCROLL_MARGIN_PX,
+        EDGE_AUTOSCROLL_MAX_SPEED_PX_PER_SEC,
+      );
+      if (velocity.x !== 0 || velocity.y !== 0) {
+        const currentStagePos = stage.position();
+        // `velocity` points in the direction the *view* should reveal more
+        // content (e.g. positive x = pointer near the right edge = "show me
+        // what's further right"). The Stage's own position is where
+        // content-space (0,0) lands on screen — revealing more content to
+        // the right means shifting that anchor *left*, i.e. the Stage must
+        // move opposite to `velocity`, not with it (bug found in manual
+        // testing: without the minus sign, dragging toward an edge panned
+        // the view the wrong way).
+        const proposedStagePos = {
+          x: currentStagePos.x - velocity.x * dt,
+          y: currentStagePos.y - velocity.y * dt,
+        };
+        const newStagePos = clampPosition(
+          proposedStagePos,
+          clampedScale,
+          stageSize,
+          contentHalfExtent,
+          PAN_MARGIN,
+        );
+        // The critical part (AC #2): panning the Stage alone would silently
+        // shift the dragged node's own screen position (screen = stagePos +
+        // nodeLocalPos × scale) even though the pointer itself hasn't
+        // moved. Re-asserting the node's *absolute* (screen-space) position
+        // right after moving the Stage keeps it visually pinned under the
+        // pointer — and stays perfectly consistent with Konva's own drag
+        // manager (`Node.js`'s `_setDragPosition`, confirmed by reading the
+        // installed Konva source): that internal logic only ever recomputes
+        // a dragged node's position relative to a *fixed* pointer-to-node
+        // screen-space offset captured once at drag-start, so as long as
+        // this node's absolute position is left exactly where it already
+        // was whenever no real pointer-move event fires, the next genuine
+        // pointer move (if any) converges to the same value with no snap.
+        const nodeAbsolutePosition = node.absolutePosition();
+        stage.position(newStagePos);
+        node.absolutePosition(nodeAbsolutePosition);
+        stage.batchDraw();
+      }
+    }
+
+    autoscrollFrameRef.current = requestAnimationFrame(autoscrollTick);
+  }
+
+  function startAutoscroll(node: Konva.Node) {
+    autoscrollNodeRef.current = node;
+    if (autoscrollFrameRef.current == null) {
+      autoscrollLastTimeRef.current = null;
+      autoscrollFrameRef.current = requestAnimationFrame(autoscrollTick);
+    }
+  }
+
+  function stopAutoscroll() {
+    if (autoscrollFrameRef.current != null) {
+      cancelAnimationFrame(autoscrollFrameRef.current);
+      autoscrollFrameRef.current = null;
+    }
+    autoscrollNodeRef.current = null;
+    autoscrollLastTimeRef.current = null;
+    // Mirrors `handleTouchTransition`'s own pattern: the loop above moves
+    // the Stage imperatively, with no `setPosition` mid-drag (same reason
+    // pinch-zoom avoids it — a `setState` at RAF-tick frequency would force
+    // a full re-render for no visual benefit); React state is synced back
+    // exactly once here, when the drag (and therefore any autoscrolling)
+    // ends, so `position` never goes stale relative to wherever the Stage
+    // actually ended up.
+    const stage = stageRef.current;
+    if (stage) {
+      setPosition(
+        clampPosition(stage.position(), clampedScale, stageSize, contentHalfExtent, PAN_MARGIN),
+      );
+    }
+  }
+
   // Reuses `fitView` — the exact same `computeFitView` call the initial
   // `useState` seeds above are computed from — one formula, read twice,
   // never two independent computations that could drift apart. Also a full
@@ -1918,11 +2037,15 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
                 gridRows={room.gridRows}
                 gridCols={room.gridCols}
                 collection={collection}
-                onDragStart={() => {
+                onDragStart={(e) => {
                   setDraggingKey(item.key);
                   bringToFront(item.pieceIds);
+                  startAutoscroll(e.target);
                 }}
-                onDragEnd={() => setDraggingKey(null)}
+                onDragEnd={() => {
+                  stopAutoscroll();
+                  setDraggingKey(null);
+                }}
                 onInstantFrameLockOutcome={triggerPulse}
                 onGenuineFusion={addPredictedFusion}
               />
@@ -1941,11 +2064,15 @@ export function RoomCanvas({ room, onReady, ref }: RoomCanvasProps) {
                 gridRows={room.gridRows}
                 gridCols={room.gridCols}
                 collection={collection}
-                onDragStart={() => {
+                onDragStart={(e) => {
                   setDraggingKey(item.key);
                   bringToFront(item.pieceIds);
+                  startAutoscroll(e.target);
                 }}
-                onDragEnd={() => setDraggingKey(null)}
+                onDragEnd={() => {
+                  stopAutoscroll();
+                  setDraggingKey(null);
+                }}
                 onInstantFrameLockOutcome={triggerPulse}
               />
             ),
