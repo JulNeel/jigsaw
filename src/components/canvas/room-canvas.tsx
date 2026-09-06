@@ -1636,6 +1636,18 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   const [position, setPosition] = useState<Point>(fitView.position);
   const [isDraggable, setIsDraggable] = useState(true);
   const lastPinchDistanceRef = useRef<number | null>(null);
+  // The 2-finger midpoint from the *previous* touchmove tick — needed
+  // alongside `lastPinchDistanceRef` so a pure 2-finger pan (fingers
+  // translating together, distance unchanged) actually moves the Stage.
+  // `zoomAtPoint` alone anchors on a single, stationary point (correct for
+  // wheel-zoom, where the cursor doesn't move) — reusing it with only the
+  // *current* midpoint, as this file originally did, made the anchor
+  // itself track the gesture 1:1, which cancels out to zero net pan
+  // whenever scale doesn't change (verified: `zoomAtPoint(p, s, s, pos)`
+  // reduces algebraically to exactly `pos`, independent of `p`). The fix
+  // anchors on where the fingers' midpoint *was* last tick instead, then
+  // translates by how far the midpoint actually moved.
+  const lastPinchMidpointRef = useRef<Point | null>(null);
   // Live scale/position while a pinch is in progress, updated imperatively
   // on the Konva Stage every frame (see `handleTouchMove`) — never through
   // `setScale`/`setPosition` mid-gesture, so a re-render doesn't happen on
@@ -1801,6 +1813,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // getting stuck `false` with no path back to `true`.
   function handleTouchTransition(touchCount: number) {
     lastPinchDistanceRef.current = null;
+    lastPinchMidpointRef.current = null;
     if (touchCount < 2 && pinchLiveRef.current) {
       // Sync React state to match wherever the pinch's own imperative
       // Konva updates actually left the Stage — exactly once, at gesture
@@ -1856,7 +1869,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
     const [a, b] = points;
     const distance = distanceBetween(a, b);
     const midpoint = midpointBetween(a, b);
-    if (lastPinchDistanceRef.current != null) {
+    if (lastPinchDistanceRef.current != null && lastPinchMidpointRef.current != null) {
       // Code review fix (2026-09-04, user report: pinch-to-zoom registered
       // but stuttered badly on Firefox for Android, while smooth on
       // Samsung Internet): this used to call `applyZoom`, which sets React
@@ -1873,8 +1886,27 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
         minScale,
         maxScale,
       );
+      // User report (2026-09-06, Story 3.18): anchoring on the *current*
+      // midpoint alone (as this used to) makes a pure 2-finger pan (no
+      // distance change) a no-op — `zoomAtPoint(p, s, s, pos)` always
+      // reduces to exactly `pos`, whatever `p` is, whenever scale doesn't
+      // change. Anchoring on last tick's midpoint instead keeps the zoom
+      // math correct, then the `midpoint - lastMidpoint` delta supplies
+      // the actual pan a moving pair of fingers is asking for — combined
+      // pan+zoom, pure pan, and pure pinch (midpoint ~stationary) all fall
+      // out of the same formula.
+      const zoomAnchoredPosition = zoomAtPoint(
+        lastPinchMidpointRef.current,
+        base.scale,
+        newScale,
+        base.position,
+      );
+      const rawNewPosition = {
+        x: zoomAnchoredPosition.x + (midpoint.x - lastPinchMidpointRef.current.x),
+        y: zoomAnchoredPosition.y + (midpoint.y - lastPinchMidpointRef.current.y),
+      };
       const newPosition = clampPosition(
-        zoomAtPoint(midpoint, base.scale, newScale, base.position),
+        rawNewPosition,
         newScale,
         stageSize,
         contentHalfExtent,
@@ -1887,6 +1919,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
       stage?.batchDraw();
     }
     lastPinchDistanceRef.current = distance;
+    lastPinchMidpointRef.current = midpoint;
   }
 
   function handleTouchEnd(e: Konva.KonvaEventObject<TouchEvent>) {
