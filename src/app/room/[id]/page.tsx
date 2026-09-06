@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Home, LogIn } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getRoomBySlug, type RoomDetail } from "@/lib/rooms/get-room-by-slug";
 import { RoomView } from "@/components/room/room-view";
@@ -59,9 +61,22 @@ export default async function RoomPage({
 
   return (
     <div className="relative h-dvh w-full overflow-hidden">
-      <h1 className="pointer-events-none absolute top-4 left-4 z-10 rounded-md bg-background/80 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
-        {room.name}
-      </h1>
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+        <Link
+          href={isGuest ? "/sign-in" : "/"}
+          aria-label={isGuest ? t("signInAriaLabel") : t("backToHomeAriaLabel")}
+          className="flex size-9 items-center justify-center rounded-full bg-background/80 shadow-sm backdrop-blur-sm"
+        >
+          {isGuest ? (
+            <LogIn className="size-4" aria-hidden="true" />
+          ) : (
+            <Home className="size-4" aria-hidden="true" />
+          )}
+        </Link>
+        <h1 className="pointer-events-none rounded-md bg-background/80 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
+          {room.name}
+        </h1>
+      </div>
       <RoomView room={room} roomSlug={slug} isGuest={isGuest} />
     </div>
   );
