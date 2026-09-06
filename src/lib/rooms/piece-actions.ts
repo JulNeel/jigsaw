@@ -73,8 +73,10 @@ function mapUnexpectedError(err: unknown): ErrorCode {
 // 3.8's AC: sorting pieces near each other must have zero effect unless
 // they actually touch). Deferred parameter per Architecture's own note
 // ("seuil de proximité... à fixer en implémentation") — tuned during manual
-// verification, not spec-mandated.
-const CONTACT_TOLERANCE_FACTOR = 0.3;
+// verification, not spec-mandated. Widened 0.3 → 0.45 (user feedback,
+// 2026-09-06: the fusion contact window felt too tight) — must exactly
+// mirror `predict-fusion.ts`'s own copy of this constant.
+const CONTACT_TOLERANCE_FACTOR = 0.45;
 
 // How far beyond a target slot's own footprint `placePiece`'s overlap guard
 // widens its unlocked first-pass scan before row-locking whatever it finds
