@@ -2112,6 +2112,19 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
             height={frameHeight}
             stroke="#A8541F"
             strokeWidth={3 / clampedScale}
+            // Story 3.18 bug fix (user report: single-finger pan still
+            // worked *inside* the Frame's own rectangle, after otherwise
+            // being disabled on empty Canvas space): Konva hit-tests a
+            // Shape's full geometry by default regardless of whether it
+            // has a `fill` — this purely decorative outline (stroke only,
+            // no interaction of its own) was the one visual-only shape in
+            // this Layer missing `listening={false}`, unlike
+            // `PlacementPulse`/`FrameCompletionGlow` below. Without it, a
+            // touch landing inside the Frame's bounds (but on no piece)
+            // hit-tested to this Rect instead of falling through to the
+            // Stage itself, so `handleTouchStart`'s `e.target === stage`
+            // check never matched there.
+            listening={false}
           />
           {renderItems.map((item) =>
             item.type === "solo" ? (
