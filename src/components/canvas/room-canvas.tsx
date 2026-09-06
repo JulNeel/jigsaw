@@ -1826,6 +1826,24 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
     // fought by a drag that started a frame earlier.
     if (e.evt.touches.length >= 2) {
       e.target.getStage()?.stopDrag();
+      return;
+    }
+    // Story 3.18: a single finger landing directly on empty Canvas space
+    // (not on a piece) must never pan the Stage — only a piece drag or a
+    // two-finger gesture should move anything now. `e.target` stays the
+    // original node a touch/drag event started on all the way up through
+    // bubbling (never reassigned to the Stage along the way — the same
+    // distinction the Stage-level `handleDragEnd` below already relies on
+    // to avoid writing a piece's own drop position into the Stage's pan
+    // state), so `e.target === stage` here means this touch started on the
+    // Stage itself, never on a piece's own draggable Group. `stopDrag()`
+    // cancels whatever Konva's native drag handling may have already
+    // started for this single-finger gesture, imperatively and immediately
+    // — the same technique the two-finger branch above already relies on,
+    // rather than waiting for `isDraggable` to propagate through a render.
+    const stage = e.target.getStage();
+    if (e.evt.touches.length === 1 && e.target === stage) {
+      stage?.stopDrag();
     }
   }
 
