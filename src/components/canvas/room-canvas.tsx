@@ -83,7 +83,7 @@ const CONTENT_MARGIN_FACTOR = 1.1;
 // across Rooms. Reasonable defaults, not spec-mandated — tune during manual
 // verification if they feel off.
 const MIN_SCALE_FACTOR = 0.5;
-const MAX_SCALE_FACTOR = 4;
+const MAX_SCALE_FACTOR = 8;
 const WHEEL_ZOOM_FACTOR = 1.05;
 // Minimum sliver (px) of content guaranteed to stay reachable at any pan
 // extreme (AC #2 / NFR-1) — reasonable default, not spec-mandated.
