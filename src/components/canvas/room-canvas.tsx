@@ -88,6 +88,13 @@ const WHEEL_ZOOM_FACTOR = 1.05;
 // Minimum sliver (px) of content guaranteed to stay reachable at any pan
 // extreme (AC #2 / NFR-1) — reasonable default, not spec-mandated.
 const PAN_MARGIN = 150;
+// How much extra tolerance (as a multiple of a slot's own half-width/
+// half-height) `nearestFrameSlot` grants beyond a slot's own footprint —
+// see that function's own comment for why this only actually matters at
+// the Frame's outer boundary. Reasonable default, not spec-mandated (user
+// feedback, 2026-09-06: the acceptance zone for a placed piece felt too
+// tight) — tune further if it still feels off.
+const FRAME_SLOT_ACCEPTANCE_FACTOR = 1.5;
 
 type ImageLoadState =
   | { status: "loading" }
@@ -222,9 +229,17 @@ function otherFreePieceScreenPositions(
 
 // The proximity threshold from Story 3.5's scope decisions: a drop point
 // snaps to a Frame slot only if it falls within that slot's own half-width/
-// half-height of its center — i.e. closer to that slot than to any
-// neighbor. Returns `null` if the drop isn't close enough to any slot, or
-// falls outside the grid entirely.
+// half-height of its center, scaled by `FRAME_SLOT_ACCEPTANCE_FACTOR` below
+// — i.e. closer to that slot than to any neighbor, plus a little extra
+// tolerance. For an interior slot this scaling has no effect in practice
+// (the nearest slot by construction is always within exactly half a tile,
+// `FRAME_SLOT_ACCEPTANCE_FACTOR`'s own margin never gets used); the factor
+// only matters for a slot on the Frame's own outer boundary, where it lets
+// a drop overshoot slightly *past* the Frame's physical edge and still snap
+// to the nearest boundary slot rather than being rejected outright —
+// previously a drop even fractionally outside the Frame's own bounding box
+// registered no slot at all, a stricter tolerance than every interior slot
+// already had. Returns `null` if the drop isn't close enough to any slot.
 function nearestFrameSlot(
   point: Point,
   frameWidth: number,
@@ -234,16 +249,15 @@ function nearestFrameSlot(
   gridRows: number,
   gridCols: number,
 ): { row: number; col: number } | null {
-  const col = Math.round((point.x + frameWidth / 2 - tileWidth / 2) / tileWidth);
-  const row = Math.round((point.y + frameHeight / 2 - tileHeight / 2) / tileHeight);
-  if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) {
-    return null;
-  }
+  const rawCol = Math.round((point.x + frameWidth / 2 - tileWidth / 2) / tileWidth);
+  const rawRow = Math.round((point.y + frameHeight / 2 - tileHeight / 2) / tileHeight);
+  const col = Math.min(gridCols - 1, Math.max(0, rawCol));
+  const row = Math.min(gridRows - 1, Math.max(0, rawRow));
   const slotCenterX = -frameWidth / 2 + col * tileWidth + tileWidth / 2;
   const slotCenterY = -frameHeight / 2 + row * tileHeight + tileHeight / 2;
   const withinThreshold =
-    Math.abs(point.x - slotCenterX) <= tileWidth / 2 &&
-    Math.abs(point.y - slotCenterY) <= tileHeight / 2;
+    Math.abs(point.x - slotCenterX) <= (tileWidth / 2) * FRAME_SLOT_ACCEPTANCE_FACTOR &&
+    Math.abs(point.y - slotCenterY) <= (tileHeight / 2) * FRAME_SLOT_ACCEPTANCE_FACTOR;
   return withinThreshold ? { row, col } : null;
 }
 
