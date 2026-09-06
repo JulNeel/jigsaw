@@ -80,6 +80,7 @@ development_status:
   3-15-auto-pan-the-canvas-while-dragging-a-piece: review
   3-16-highlight-the-frame-pieces: review
   3-17-update-the-first-access-tutorial-for-the-new-canvas-features: ready-for-dev
+  3-18-split-single-finger-vs-two-finger-navigation-on-mobile: ready-for-dev
   epic-3-retrospective: optional
 
   epic-4: backlog

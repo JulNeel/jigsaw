@@ -537,6 +537,23 @@ So that I discover the reference-image view and the frame-piece highlight the sa
 
 **Note — scope decision (2026-09-05), confirmed with the user before this story was written:** Story 3.15 (auto-pan while dragging near an edge) deliberately gets **no** new tutorial step — it's a passive behavior that happens automatically during the gesture the tutorial already teaches (moving a piece), not a new button or a gesture a Guest has to learn; adding a step for it would teach nothing actionable. Revisit only if real usage shows Participants aren't discovering it on their own.
 
+### Story 3.18: Split single-finger vs two-finger navigation on mobile
+
+As a Participant on a touch device,
+I want a single finger to only ever move a piece (or do nothing, on empty space) and two fingers to be the only way to pan/zoom the Canvas,
+So that a one-finger slide never ambiguously moves the Canvas *or* a piece depending on exactly where my finger happened to land.
+
+**Acceptance Criteria:**
+
+**Given** a Participant on a touch device
+**When** a single finger touches and drags a piece
+**Then** that piece moves, exactly as today — this story changes nothing about piece-dragging itself
+**And** when a single finger touches and drags empty Canvas space (not a piece), nothing happens — the Canvas itself no longer pans from a one-finger touch gesture
+**And** when two fingers touch the Canvas anywhere (over a piece or empty space) and pinch/pan, the Canvas pans and/or zooms exactly as today (Story 3.3's existing pinch-to-zoom, which already supports a combined pan+zoom gesture, not just pure pinching)
+**And** this change is touch-only — desktop mouse/trackpad panning (a single mouse-drag on empty Canvas space) is completely unaffected
+
+**Note — scope decision (2026-09-06), confirmed with the user before this story was written:** amends Story 3.3's own original mobile gesture spec (UX-DR15: "one-finger pan, pinch-zoom"), based on real usage — a one-finger slide being ambiguous between "move the Canvas" and "move a piece" (depending on whether the finger happened to land exactly on a piece) was reported as confusing, not a deliberate trade-off worth keeping. Adopts the touch model used by Procreate/Figma mobile/Concepts: one finger is exclusively for direct manipulation (a piece), two fingers exclusively for camera navigation (pan/zoom). The "or select" possibility for a one-finger touch on empty space (mentioned by the user) is explicitly deferred — this app has no selection concept today; revisit only if one gets added later.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
