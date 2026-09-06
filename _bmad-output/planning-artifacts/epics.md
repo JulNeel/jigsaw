@@ -522,6 +522,21 @@ So that I can sort them out from the pile the way I would with a physical puzzle
 
 **Note — scope decision (2026-09-05), confirmed with the user before this story was written:** interaction is a **toggle** (stays active until pressed again), not press-and-hold like Story 3.14's reference-image button — sorting out every frame piece from a pile is a task that takes real time, unlike a quick glance at the source image. The toggle's state is deliberately **not persisted** (resets to off on reload) — a transient work aid, not a durable preference like sound-mute; revisit only if real usage shows a need to persist it.
 
+### Story 3.17: Update the first-access tutorial for the new Canvas features
+
+As a first-time Guest,
+I want the onboarding tutorial to mention the Canvas buttons that were added after it was originally written,
+So that I discover the reference-image view and the frame-piece highlight the same way I discover moving, rotating, and fusing a piece.
+
+**Acceptance Criteria:**
+
+**Given** the first-access tutorial (Story 3.2), which already teaches moving, rotating, placing into the Frame, and fusing into an Îlot
+**When** a new Guest sees it for the first time in a Room
+**Then** it also includes a step introducing the reference-image button (Story 3.14, press-and-hold to see the full picture) and a step introducing the "highlight frame pieces" toggle (Story 3.16)
+**And** every other existing behavior of the tutorial (first-visit-per-Room-per-session gating, every dismissal path, Guest-only visibility) is completely unchanged — this story only adds content, it never touches the mechanism
+
+**Note — scope decision (2026-09-05), confirmed with the user before this story was written:** Story 3.15 (auto-pan while dragging near an edge) deliberately gets **no** new tutorial step — it's a passive behavior that happens automatically during the gesture the tutorial already teaches (moving a piece), not a new button or a gesture a Guest has to learn; adding a step for it would teach nothing actionable. Revisit only if real usage shows Participants aren't discovering it on their own.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
