@@ -1,4 +1,5 @@
 import { classifyPieceShape, type PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
+import { DIRECTION_OFFSETS, type OrthogonalDirection } from "./true-neighbors";
 
 export type PlacementRejectionReason = "ROTATION_INVALID" | "SHAPE_MISMATCH" | "NEIGHBOR_MISMATCH";
 
@@ -28,15 +29,6 @@ export function validatePieceOrientationAndShape(
   return { valid: true };
 }
 
-export type OrthogonalDirection = "up" | "down" | "left" | "right";
-
-const DIRECTION_OFFSETS: Record<OrthogonalDirection, readonly [number, number]> = {
-  up: [-1, 0],
-  down: [1, 0],
-  left: [0, -1],
-  right: [0, 1],
-};
-
 // Given, for each orthogonal direction, which piece (if any) is *truly* the
 // piece's neighbor in that specific direction (from PieceAdjacency's graph
 // combined with each neighbor's own true grid position — never just "is it
@@ -59,7 +51,7 @@ export function validatePlacementNeighbors(
   targetCol: number,
 ): PlacementValidationResult {
   for (const direction of Object.keys(DIRECTION_OFFSETS) as OrthogonalDirection[]) {
-    const [rowOffset, colOffset] = DIRECTION_OFFSETS[direction];
+    const { row: rowOffset, col: colOffset } = DIRECTION_OFFSETS[direction];
     const key = `${targetRow + rowOffset},${targetCol + colOffset}`;
     const occupyingPieceId = occupiedAdjacentSlots.get(key);
     if (occupyingPieceId === undefined) {

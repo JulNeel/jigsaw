@@ -1,17 +1,37 @@
-import type { OrthogonalDirection } from "./validate-placement";
+// The single canonical source for the up/down/left/right ↔ row/col-delta
+// convention — reused by `validate-placement.ts` (Frame-slot validation)
+// and `validate-fusion.ts` (free-space fusion validation). Both ultimately
+// ask the same question ("is the piece touching me in direction X really
+// my true neighbor in that exact direction?"), just in two different
+// coordinate spaces (discrete grid slots vs continuous screen positions) —
+// this table used to be copy-pasted separately in each of those files (plus
+// a third, inverse copy in `piece-actions.ts`), which made the shared rule
+// harder to see than it actually is.
+export type OrthogonalDirection = "up" | "down" | "left" | "right";
+
+export const DIRECTION_OFFSETS: Record<OrthogonalDirection, { row: number; col: number }> = {
+  up: { row: -1, col: 0 },
+  down: { row: 1, col: 0 },
+  left: { row: 0, col: -1 },
+  right: { row: 0, col: 1 },
+};
+
+// The inverse of `DIRECTION_OFFSETS` — given a grid delta between two
+// pieces, which direction (if any) it represents. Derived from the same
+// table rather than a separately hardcoded mapping, so the two can never
+// silently drift apart.
+export function directionFromDelta(deltaRow: number, deltaCol: number): OrthogonalDirection | undefined {
+  return (Object.keys(DIRECTION_OFFSETS) as OrthogonalDirection[]).find(
+    (direction) =>
+      DIRECTION_OFFSETS[direction].row === deltaRow && DIRECTION_OFFSETS[direction].col === deltaCol,
+  );
+}
 
 // Deliberately independent of Postgres/`piece_adjacency` — pure enough to
 // run identically server-side (if ever wired there) and client-side (Story
 // 3.11), fed only by each piece's true grid position, now included in the
 // Room's client payload.
 export type GridPositioned = { id: string; gridRow: number; gridCol: number };
-
-const DIRECTION_OFFSETS: Record<OrthogonalDirection, readonly [number, number]> = {
-  up: [-1, 0],
-  down: [1, 0],
-  left: [0, -1],
-  right: [0, 1],
-};
 
 // Mirrors `compute-adjacency.ts`'s own rule exactly (orthogonal grid deltas,
 // nothing else) — this app's cutting algorithm never produces a "true
@@ -25,7 +45,7 @@ export function computeTrueNeighborsByDirection(
 ): Partial<Record<OrthogonalDirection, string>> {
   const result: Partial<Record<OrthogonalDirection, string>> = {};
   for (const direction of Object.keys(DIRECTION_OFFSETS) as OrthogonalDirection[]) {
-    const [rowOffset, colOffset] = DIRECTION_OFFSETS[direction];
+    const { row: rowOffset, col: colOffset } = DIRECTION_OFFSETS[direction];
     const targetRow = piece.gridRow + rowOffset;
     const targetCol = piece.gridCol + colOffset;
     const neighbor = allPieces.find(
