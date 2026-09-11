@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.15: Auto-pan the Canvas while dragging a piece near the edge
 
-Status: review
+Status: done
 
 ## Story
 

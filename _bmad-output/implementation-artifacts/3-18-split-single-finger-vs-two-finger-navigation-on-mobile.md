@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.18: Split single-finger vs two-finger navigation on mobile
 
-Status: review
+Status: done
 
 ## Story
 

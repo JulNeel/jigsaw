@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.16: Highlight the frame pieces
 
-Status: review
+Status: done
 
 ## Story
 
