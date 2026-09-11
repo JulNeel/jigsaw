@@ -435,6 +435,24 @@ type PredictedFusion = {
   offsetsByPieceId: ReadonlyMap<string, { row: number; col: number }>;
 };
 
+// Story 3.19: a purely local, never-persisted "predicted Cluster lock" —
+// every member of an Îlot a client-side prediction already believes just
+// locked into the Frame, rendered individually placed at its own slot
+// immediately, before the server's confirmed rows (and the Cluster row's
+// own deletion) arrive. Same "local-only override, never a write to the
+// read-only `clusters` collection" idiom as `PredictedFusion` above.
+// Module-level for the same reason `PredictedFusion` is — `ClusterGroupSprite`
+// receives this only through a callback prop.
+type PredictedClusterLock = {
+  clusterId: string;
+  // The id `move-conflict-events.ts`'s `emitMoveConflict` reports on
+  // rejection — always the representative member's, since that's the only
+  // id `placePiece`/`movePiece` are ever dispatched with for a Cluster.
+  representativePieceId: string;
+  targetByPieceId: ReadonlyMap<string, { row: number; col: number }>;
+  sinceVersion: number;
+};
+
 // An unclustered piece — placed (locked into the Frame, never draggable
 // again) or free-floating (scatter position, fully draggable).
 function SoloPieceSprite({
@@ -812,6 +830,7 @@ function ClusterGroupSprite({
   onDragStart,
   onDragEnd,
   onInstantFrameLockOutcome,
+  onPredictedClusterLock,
   highlightFramePieces,
 }: {
   cluster: RoomDetailCluster;
@@ -829,6 +848,9 @@ function ClusterGroupSprite({
   onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
+  // Story 3.19: called only when a Frame-slot drop's own `predictedLock` is
+  // `true` — see `handleDragEnd`'s own comment for what it carries.
+  onPredictedClusterLock: (prediction: PredictedClusterLock) => void;
   // Story 3.16: evaluated per member below, not once for the whole Cluster
   // — a mixed Cluster (one frame piece + one interior piece fused together)
   // is a normal case, since fusion is adjacency-based, not shape-based.
@@ -961,21 +983,24 @@ function ClusterGroupSprite({
       gridCols,
     );
     if (slot) {
-      // Unlike a solo piece, a Cluster never needs client-side prediction
-      // to avoid a premature visual snap: this Group only ever renders via
-      // `cluster.anchorX/Y`/`optimisticAnchor` (never via `placedRow`), and
-      // a piece stays classified as a Cluster member (see `RoomCanvas`'s
-      // `membersByClusterId` split) until the real Realtime-confirmed row
-      // arrives with `clusterId: null` — so setting `placedRow` optimistically
-      // here causes no premature slot-snap to correct for. `placedRow`/
-      // `placedCol` are therefore always set below, letting `placePiece`
-      // always get a real chance to lock the whole Cluster in (AC #3/AD-2 —
-      // this must never depend on a client-side guess). The prediction is
-      // still computed, though — code review fix (2026-09-02): without it,
-      // every ordinary rejected Cluster lock (as common as a rejected solo
-      // placement) fired the Story 3.11 "beaten to it" conflict toast, since
-      // that toast's gate has no other way to tell "the client expected this
-      // to work" from "no one expected this to work."
+      // Unlike a solo piece, setting the representative member's own
+      // `placedRow` below never by itself causes a premature visual snap:
+      // this Group only ever renders via `cluster.anchorX/Y`/`optimisticAnchor`
+      // (never via `placedRow`), and a piece stays classified as a Cluster
+      // member (see `RoomCanvas`'s `membersByClusterId` split) until the
+      // real Realtime-confirmed row arrives with `clusterId: null`.
+      // `placedRow`/`placedCol` are therefore always set below, letting
+      // `placePiece` always get a real chance to lock the whole Cluster in
+      // (AC #3/AD-2 — this must never depend on a client-side guess).
+      //
+      // The prediction below (`predictFrameLock`) was originally computed
+      // only to gate the Story 3.11 "beaten to it" conflict toast (code
+      // review fix, 2026-09-02 — every ordinary rejected Cluster lock, as
+      // common as a rejected solo placement, otherwise fired that toast with
+      // no other way to tell "the client expected this to work" from "no one
+      // expected this to work"). Story 3.19 now also drives a real optimistic
+      // render off it — see `onPredictedClusterLock` below — the two uses are
+      // independent consumers of the same `predictedLock` boolean.
       const memberIds = new Set(members.map((m) => m.id));
       const { outcome } = predictFrameLock({
         members: members.map((m) => ({
@@ -1005,10 +1030,7 @@ function ClusterGroupSprite({
       const predictedLock = outcome === "locked";
       markPredictedLock(representativeMember.id, predictedLock);
       // Only a genuine validation attempt gets a success chime, and only on
-      // success — see `SoloPieceSprite`'s handleDragEnd. No colored pulse
-      // here (yet) — a Cluster lock-in's own optimistic-feedback gap is a
-      // pre-existing, already-tracked limitation (`deferred-work.md`), not
-      // something this change expands the scope of.
+      // success — see `SoloPieceSprite`'s handleDragEnd.
       if (predictedLock) {
         // Code review fix (2026-09-02): without this, the representative
         // member's own confirmed `subscribePiecePlaced` event (which every
@@ -1024,6 +1046,38 @@ function ClusterGroupSprite({
         markInstantPlacementFeedbackShown(representativeMember.id);
         if (!muted) {
           playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+        }
+        // Story 3.19: every member's own predicted absolute target slot —
+        // same offset-difference formula `predictFrameLock`'s own `members`
+        // param above already uses, just applied to the already-known
+        // `slot` instead of re-deriving the anchor (mirrors `placePiece`'s
+        // own server-side `anchorTargetRow + m.offsetRow` math). Drives both
+        // the instant per-member pulse (AC #2) and `RoomCanvas`'s own
+        // render-classification override (AC #1) — this is what actually
+        // closes the "Cluster lock-in has no immediate visual feedback" gap;
+        // the chime above was never the missing part.
+        const targetByPieceId = new Map(
+          members.map((m) => [
+            m.id,
+            {
+              row: slot.row + (m.clusterOffsetRow! - representativeMember.clusterOffsetRow!),
+              col: slot.col + (m.clusterOffsetCol! - representativeMember.clusterOffsetCol!),
+            },
+          ]),
+        );
+        onPredictedClusterLock({
+          clusterId: cluster.id,
+          representativePieceId: representativeMember.id,
+          targetByPieceId,
+          sinceVersion: expectedResultVersion,
+        });
+        for (const m of members) {
+          const target = targetByPieceId.get(m.id)!;
+          const slotCenter = {
+            x: -frameWidth / 2 + target.col * tileWidth + tileWidth / 2,
+            y: -frameHeight / 2 + target.row * tileHeight + tileHeight / 2,
+          };
+          onInstantFrameLockOutcome(m.id, PLACEMENT_PULSE_LOCKED_COLOR, slotCenter);
         }
       }
       collection.update(representativeMember.id, (draft) => {
@@ -1567,6 +1621,56 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
     return { predictedClusterIdByPieceId: byPieceId, predictedClustersById: byId };
   }, [activePredictedFusions]);
 
+  // Story 3.19: mirrors `predictedFusions` above exactly, for the opposite
+  // direction — instead of anticipating a fusion that hasn't landed yet,
+  // this anticipates a whole Îlot's Frame lock-in before the server confirms
+  // it, so every member snaps to its own slot instantly instead of the
+  // Cluster's Group sitting still at the raw drop point (today's actual
+  // behavior — see `ClusterGroupSprite`'s own Dev Notes for why nothing at
+  // all currently changes visually in that window).
+  const [predictedClusterLocks, setPredictedClusterLocks] = useState<
+    readonly PredictedClusterLock[]
+  >([]);
+
+  // "Confirmed" once the real Cluster row is gone entirely (the lock
+  // succeeded — `placePiece` deletes it atomically alongside setting every
+  // member's `placedRow`) — or, if the Cluster is still there, once its own
+  // `version` has moved past what this prediction expected (a genuine
+  // rejection landed as a plain reposition/fusion instead, which — per
+  // `repositionPlain`'s own existing behavior — always bumps `cluster.version`
+  // even when it doesn't lock). Same version-floor technique `optimisticAnchor`
+  // already relies on, read at render time, never via an effect + `setState`.
+  function isClusterLockConfirmed(pcl: PredictedClusterLock): boolean {
+    const cluster = clustersById.get(pcl.clusterId);
+    return !cluster || cluster.version >= pcl.sinceVersion;
+  }
+  const addPredictedClusterLock = (prediction: PredictedClusterLock) => {
+    setPredictedClusterLocks((prev) => [
+      ...prev.filter((pcl) => !isClusterLockConfirmed(pcl)),
+      prediction,
+    ]);
+  };
+  const activePredictedClusterLocks = predictedClusterLocks.filter(
+    (pcl) => !isClusterLockConfirmed(pcl),
+  );
+
+  // The server's own re-validation rarely disagreeing with a predicted lock
+  // is the only other way this prediction ever needs to go away before
+  // `cluster.version` naturally catches up — reacting to it immediately
+  // rather than leaving members stuck showing "placed" at the wrong slots.
+  // Reuses the same signal `optimisticAnchor` already subscribes to
+  // (widened in this story to also cover a rejected Frame-lock attempt, not
+  // just a rejected plain move) — matched by `representativePieceId`, the
+  // only id a Cluster's own `placePiece`/`movePiece` call is ever dispatched
+  // with.
+  useEffect(() => {
+    return subscribeMoveConflict((pieceId) => {
+      setPredictedClusterLocks((prev) =>
+        prev.filter((pcl) => pcl.representativePieceId !== pieceId),
+      );
+    });
+  }, []);
+
   // Split once per render into "renders alone" vs "renders inside its
   // Cluster's Group" — a piece with a `clusterId` that doesn't (yet) match
   // a loaded Cluster row is a one-render sync gap (piece update arriving
@@ -1575,12 +1679,28 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // active `predictedFusions` entry (Story 3.13) is grouped under that
   // prediction's own temporary id instead of rendering alone — the real
   // `clusterId` branch above always wins once it's genuinely confirmed, so
-  // this can never contradict real data, only anticipate it.
+  // this can never contradict real data, only anticipate it. Story 3.19: the
+  // opposite direction — a genuinely-still-clustered piece covered by an
+  // active `predictedClusterLocks` entry renders *alone*, placed at its own
+  // predicted slot, instead of inside its Cluster's Group; `pieceRenderPosition`'s
+  // own `placedRow != null` priority does the rest, with zero new position math.
   const { soloPieces, membersByClusterId } = useMemo(() => {
     const solo: RoomDetailPiece[] = [];
     const byCluster = new Map<string, RoomDetailPiece[]>();
     for (const piece of pieces) {
-      if (piece.clusterId != null && clustersById.has(piece.clusterId)) {
+      const predictedLock =
+        piece.clusterId != null
+          ? activePredictedClusterLocks.find((pcl) => pcl.clusterId === piece.clusterId)
+          : undefined;
+      const predictedTarget = predictedLock?.targetByPieceId.get(piece.id);
+      if (piece.clusterId != null && predictedTarget) {
+        // A clone, not the live piece — the real row's own `placedRow`/
+        // `clusterId` are still exactly what they were before the drop
+        // (only the representative member's row was optimistically
+        // mutated, and never `clusterId` at all — see `ClusterGroupSprite`'s
+        // own Dev Notes). Only rendering reads this clone.
+        solo.push({ ...piece, placedRow: predictedTarget.row, placedCol: predictedTarget.col });
+      } else if (piece.clusterId != null && clustersById.has(piece.clusterId)) {
         const members = byCluster.get(piece.clusterId) ?? [];
         members.push(piece);
         byCluster.set(piece.clusterId, members);
@@ -1608,7 +1728,13 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
       }
     }
     return { soloPieces: solo, membersByClusterId: byCluster };
-  }, [pieces, clustersById, predictedClusterIdByPieceId, activePredictedFusions]);
+  }, [
+    pieces,
+    clustersById,
+    predictedClusterIdByPieceId,
+    activePredictedFusions,
+    activePredictedClusterLocks,
+  ]);
 
   // Measures the actual wrapping container (not `window.innerWidth/Height`,
   // which can differ from it — desktop scrollbar gutter, mobile browser
@@ -2211,6 +2337,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
                   setDraggingKey(null);
                 }}
                 onInstantFrameLockOutcome={triggerPulse}
+                onPredictedClusterLock={addPredictedClusterLock}
                 highlightFramePieces={highlightFramePieces}
               />
             ),

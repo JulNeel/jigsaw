@@ -1,15 +1,21 @@
 "use client";
 
 // A tiny, decoupled event channel bridging `collections.ts`'s `onUpdate`
-// (which has no natural way to reach React state) and `ClusterGroupSprite`'s
-// own `optimisticAnchor` — the signal that a specific piece's `movePiece`
-// attempt was just rejected (`STALE_WRITE` or otherwise), so whichever
-// component is optimistically guessing that piece's position can stop
-// trusting that guess immediately, rather than waiting for (or misreading)
-// a Realtime confirmation. Same module-level pub-sub idiom as
-// `placement-conflict-events.ts` — carries a `pieceId` here since, unlike a
-// Frame-lock conflict (always resolved via a single shared toast), this
-// needs to reach the *specific* component instance rendering that piece.
+// (which has no natural way to reach React state) and whichever component
+// is optimistically guessing a Cluster's position/placement —
+// `ClusterGroupSprite`'s own `optimisticAnchor`, and (Story 3.19)
+// `RoomCanvas`'s own `predictedClusterLocks` — the signal that a specific
+// piece's `movePiece` *or* `placePiece` attempt was just rejected
+// (`STALE_WRITE` or otherwise), so either can stop trusting its guess
+// immediately, rather than waiting for (or misreading) a Realtime
+// confirmation. Despite the filename, this fires for *any* rejected write
+// on the piece, not just a plain move — a rejected Cluster Frame-lock
+// attempt needs the same signal (Story 3.19 widened this; kept the
+// existing name/exports to minimize diff rather than renaming). Same
+// module-level pub-sub idiom as `placement-conflict-events.ts` — carries a
+// `pieceId` here since, unlike a Frame-lock conflict (always resolved via a
+// single shared toast), this needs to reach the *specific* component
+// instance rendering that piece.
 //
 // Code review fix (2026-09-05, user report: dragging the same Cluster
 // repeatedly made it visibly "replay" through each intermediate position
