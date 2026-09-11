@@ -1,4 +1,4 @@
-export type Direction = "up" | "down" | "left" | "right";
+import { DIRECTION_OFFSETS, type OrthogonalDirection } from "./true-neighbors";
 
 export type FusionPieceInfo = {
   pieceId: string;
@@ -8,13 +8,6 @@ export type FusionPieceInfo = {
 };
 
 export type ScreenPositioned = FusionPieceInfo & { screenX: number; screenY: number };
-
-const DIRECTION_DELTA: Record<Direction, { row: number; col: number }> = {
-  up: { row: -1, col: 0 },
-  down: { row: 1, col: 0 },
-  left: { row: 0, col: -1 },
-  right: { row: 0, col: 1 },
-};
 
 /**
  * A genuine contact between piece `a` (in the dragged group) and piece `b`
@@ -28,7 +21,7 @@ const DIRECTION_DELTA: Record<Direction, { row: number; col: number }> = {
 export function isGenuineContact(
   a: FusionPieceInfo,
   b: FusionPieceInfo,
-  direction: Direction,
+  direction: OrthogonalDirection,
   trueNeighborIdsOfA: ReadonlySet<string>,
 ): boolean {
   if (a.rotation !== 0 || b.rotation !== 0) {
@@ -37,14 +30,14 @@ export function isGenuineContact(
   if (!trueNeighborIdsOfA.has(b.pieceId)) {
     return false;
   }
-  const delta = DIRECTION_DELTA[direction];
+  const delta = DIRECTION_OFFSETS[direction];
   return b.gridRow === a.gridRow + delta.row && b.gridCol === a.gridCol + delta.col;
 }
 
 export type ContactCandidate = {
   a: FusionPieceInfo;
   b: FusionPieceInfo;
-  direction: Direction;
+  direction: OrthogonalDirection;
 };
 
 /**

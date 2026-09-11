@@ -7,7 +7,6 @@ import {
   canBootstrapWithoutNeighbor,
   validatePieceOrientationAndShape,
   validatePlacementNeighbors,
-  type OrthogonalDirection,
 } from "@/lib/validation/validate-placement";
 import {
   findContactCandidates,
@@ -15,6 +14,7 @@ import {
   type ScreenPositioned,
 } from "@/lib/validation/validate-fusion";
 import { overlapsAnyFreePiece } from "@/lib/validation/validate-overlap";
+import { directionFromDelta, type OrthogonalDirection } from "@/lib/validation/true-neighbors";
 import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 
 // No auth gate on any of these — placing/moving/rotating/fusing a piece is
@@ -803,16 +803,7 @@ export async function placePiece(input: {
       }
       const deltaRow = row.neighbor_grid_row - member.gridRow;
       const deltaCol = row.neighbor_grid_col - member.gridCol;
-      const direction: OrthogonalDirection | undefined =
-        deltaRow === -1 && deltaCol === 0
-          ? "up"
-          : deltaRow === 1 && deltaCol === 0
-            ? "down"
-            : deltaRow === 0 && deltaCol === -1
-              ? "left"
-              : deltaRow === 0 && deltaCol === 1
-                ? "right"
-                : undefined;
+      const direction = directionFromDelta(deltaRow, deltaCol);
       if (!direction) {
         continue;
       }
