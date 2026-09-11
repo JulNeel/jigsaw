@@ -76,7 +76,7 @@
   },
   "Tutorial": {
     "title": "Bienvenue dans le Salon",
-    "subtitle": "Quatre gestes pour commencer à contribuer",
+    "subtitle": "Quelques gestes pour commencer à contribuer",
     "step1Title": "Déplacer une pièce",
     "step1Description": "Glissez-la où vous voulez dans l'espace",
     "step2Title": "Pivoter une pièce",
@@ -85,6 +85,10 @@
     "step3Description": "Elle s'accroche seule si elle correspond",
     "step4Title": "Créer un Îlot",
     "step4Description": "Rapprochez deux pièces compatibles pour les assembler",
+    "step5Title": "Voir l'image complète",
+    "step5Description": "Maintenez le bouton enfoncé pour voir la photo d'origine",
+    "step6Title": "Repérer les pièces de cadre",
+    "step6Description": "Ce bouton assombrit les autres pièces pour vous aider à les trier",
     "start": "Commencer",
     "later": "Plus tard",
     "closeAriaLabel": "Fermer le tutoriel"

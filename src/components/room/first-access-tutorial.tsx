@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { Frame, Group, Hand, RotateCw, X } from "lucide-react";
+import { Eye, Frame, Group, Hand, ImageIcon, RotateCw, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,15 @@ const STEPS = [
   { icon: RotateCw, titleKey: "step2Title", descriptionKey: "step2Description" },
   { icon: Frame, titleKey: "step3Title", descriptionKey: "step3Description" },
   { icon: Group, titleKey: "step4Title", descriptionKey: "step4Description" },
+  // Story 3.17: mirrors ReferenceImageButton's own icon (ImageIcon) —
+  // matching a step's icon to the icon on the actual button it describes
+  // helps a Guest connect the two later.
+  { icon: ImageIcon, titleKey: "step5Title", descriptionKey: "step5Description" },
+  // Story 3.17: deliberately *not* the `Frame` icon already used by step3
+  // above — HighlightFramePiecesButton also uses `Frame` for its own
+  // button, and reusing it a third time here would put two identically-
+  // iconed steps in one dialog conveying two different meanings.
+  { icon: Eye, titleKey: "step6Title", descriptionKey: "step6Description" },
 ] as const;
 
 function subscribeNoop() {
