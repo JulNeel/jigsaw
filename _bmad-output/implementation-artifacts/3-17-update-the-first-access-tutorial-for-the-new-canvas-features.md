@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.17: Update the first-access tutorial for the new Canvas features
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -19,14 +19,14 @@ so that I discover the reference-image view and the frame-piece highlight the sa
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add the two missing steps to the tutorial's content (AC: #1)
-  - [ ] **Read `src/components/room/first-access-tutorial.tsx` in full before touching it.** `STEPS` (a `const` array near the top of the file) is the entire content model — each entry is `{ icon, titleKey, descriptionKey }`, rendered in order inside the dialog by a single `.map()` (no per-step conditional logic, no step count assumed elsewhere in the file or in `tutorial-seen.ts` — confirmed that file keys its `sessionStorage` entry purely by `roomSlug`, with no version/hash tied to step content, so adding steps needs no migration of any kind for a Guest who already dismissed the *old* 4-step version).
-  - [ ] Append two new entries to `STEPS`, after the existing 4 (order: teach the base gestures first, the two newer helper features last) — one for the reference-image button (Story 3.14), one for the "highlight frame pieces" toggle (Story 3.16).
-  - [ ] New translation keys in `messages/fr.json`'s `Tutorial` section, following the exact existing `step{N}Title`/`step{N}Description` naming convention (`step5Title`/`step5Description`, `step6Title`/`step6Description`) and this section's established tone (short, imperative, matching `step1Title: "Déplacer une pièce"`'s register) — content should describe *what the button does and why*, e.g. (adjust wording to match the app's own voice, these are a starting point, not mandated copy): step5 for the reference image ("Voir l'image complète" / "Maintenez le bouton enfoncé pour voir la photo d'origine"), step6 for frame-piece highlighting ("Repérer les pièces de cadre" / "Ce bouton assombrit les autres pièces pour vous aider à les trier").
-  - [ ] Pick a `lucide-react` icon for each new step. **Check for a collision before choosing:** `STEPS` already uses the `Frame` icon for the existing step3 ("La positionner dans le Cadre") — Story 3.16's own `HighlightFramePiecesButton` (`src/components/canvas/highlight-frame-pieces-button.tsx`) also uses `Frame` for its own button. Using `Frame` a *second* time for this tutorial's new "highlight frame pieces" step would put two visually identical icons in the same dialog for two different meanings (placing into the Frame vs. highlighting frame pieces) — pick a distinct icon for this step instead (e.g. something evoking "reveal"/"spotlight", check the installed `lucide-react` icon list rather than assuming a name exists). For the reference-image step, reusing the same icon `ReferenceImageButton` itself already uses (`ImageIcon`, confirmed present, no collision with any existing tutorial-step icon) is recommended — matching a tutorial step's icon to the icon on the actual button it describes helps a Guest connect the two later.
+- [x] Task 1: Add the two missing steps to the tutorial's content (AC: #1)
+  - [x] **Read `src/components/room/first-access-tutorial.tsx` in full before touching it.** `STEPS` (a `const` array near the top of the file) is the entire content model — each entry is `{ icon, titleKey, descriptionKey }`, rendered in order inside the dialog by a single `.map()` (no per-step conditional logic, no step count assumed elsewhere in the file or in `tutorial-seen.ts` — confirmed that file keys its `sessionStorage` entry purely by `roomSlug`, with no version/hash tied to step content, so adding steps needs no migration of any kind for a Guest who already dismissed the *old* 4-step version).
+  - [x] Append two new entries to `STEPS`, after the existing 4 (order: teach the base gestures first, the two newer helper features last) — one for the reference-image button (Story 3.14), one for the "highlight frame pieces" toggle (Story 3.16).
+  - [x] New translation keys in `messages/fr.json`'s `Tutorial` section, following the exact existing `step{N}Title`/`step{N}Description` naming convention (`step5Title`/`step5Description`, `step6Title`/`step6Description`) and this section's established tone (short, imperative, matching `step1Title: "Déplacer une pièce"`'s register) — content should describe *what the button does and why*, e.g. (adjust wording to match the app's own voice, these are a starting point, not mandated copy): step5 for the reference image ("Voir l'image complète" / "Maintenez le bouton enfoncé pour voir la photo d'origine"), step6 for frame-piece highlighting ("Repérer les pièces de cadre" / "Ce bouton assombrit les autres pièces pour vous aider à les trier").
+  - [x] Pick a `lucide-react` icon for each new step. **Check for a collision before choosing:** `STEPS` already uses the `Frame` icon for the existing step3 ("La positionner dans le Cadre") — Story 3.16's own `HighlightFramePiecesButton` (`src/components/canvas/highlight-frame-pieces-button.tsx`) also uses `Frame` for its own button. Using `Frame` a *second* time for this tutorial's new "highlight frame pieces" step would put two visually identical icons in the same dialog for two different meanings (placing into the Frame vs. highlighting frame pieces) — pick a distinct icon for this step instead (e.g. something evoking "reveal"/"spotlight", check the installed `lucide-react` icon list rather than assuming a name exists). For the reference-image step, reusing the same icon `ReferenceImageButton` itself already uses (`ImageIcon`, confirmed present, no collision with any existing tutorial-step icon) is recommended — matching a tutorial step's icon to the icon on the actual button it describes helps a Guest connect the two later.
 
-- [ ] Task 2: Regression + manual verification (AC: #1, #2)
-  - [ ] `pnpm build && pnpm lint && pnpm test` clean.
+- [x] Task 2: Regression + manual verification (AC: #1, #2)
+  - [x] `pnpm build && pnpm lint && pnpm test` clean.
   - [ ] Manual verification (this repo has no canvas/visual-regression or component-testing infrastructure, consistent with every other Canvas-interaction story this session): (1) as a Guest visiting a Room for the first time this session, confirm the tutorial dialog now shows 6 steps in order, the 2 new ones rendering correctly (icon, title, description); (2) confirm every existing dismissal path (Escape, overlay click, close X, "Commencer", "Plus tard") still closes the dialog and still marks it seen for the rest of the session, exactly as before; (3) confirm a Participant who already dismissed the *old* 4-step tutorial earlier in the same session (before this story's own deploy) is unaffected — no forced re-show, since `tutorial-seen.ts` was confirmed to key purely on `roomSlug`, not on step content/count.
 
 ## Dev Notes
@@ -64,14 +64,25 @@ so that I discover the reference-image view and the frame-piece highlight the sa
 
 ### Agent Model Used
 
+Claude Sonnet 5
+
 ### Debug Log References
+
+- `pnpm build && pnpm lint && pnpm test` — clean, 212 tests passing, no regressions.
 
 ### Completion Notes List
 
+- Task 1: Added `step5` (reference image, `ImageIcon` — matches `ReferenceImageButton`'s own icon) and `step6` (highlight frame pieces, `Eye` — deliberately distinct from `Frame`, already used by step3, to avoid the icon collision this story's Dev Notes flagged) to `STEPS` in `first-access-tutorial.tsx`. Four new translation keys added to `messages/fr.json`'s `Tutorial` section. Also fixed `Tutorial.subtitle` ("Quatre gestes..." → "Quelques gestes...") since it would otherwise have stayed literally wrong once a 5th/6th step existed — a direct, unavoidable consequence of this story's own content addition, not scope creep.
+- Task 2: `pnpm build && pnpm lint && pnpm test` all clean. Manual verification left unchecked — this environment has no browser to actually open the tutorial dialog and confirm the 6 steps/dismissal paths render correctly; needs the user's own pass per the story's Task 2 checklist.
+
 ### File List
+
+- `src/components/room/first-access-tutorial.tsx` (modified — two new `STEPS` entries, `Eye`/`ImageIcon` imports)
+- `messages/fr.json` (modified — `Tutorial.step5Title`/`step5Description`/`step6Title`/`step6Description`, `Tutorial.subtitle` corrected)
 
 ## Change Log
 
 | Date | Change |
 |------|--------|
 | 2026-09-05 | Story created: two new tutorial steps (reference image, highlight frame pieces) for features added by Stories 3.14/3.16 after the tutorial was originally written; Story 3.15 explicitly excluded (passive behavior, nothing to teach). Caught by the user directly asking whether the tutorial had been kept up to date. |
+| 2026-09-11 | Implemented Task 1: two new `STEPS` entries + translation keys, plus a subtitle fix ("Quatre" → "Quelques" gestes) made necessary by adding steps. `pnpm build && pnpm lint && pnpm test` clean. Status → review; manual verification left to the user (no browser in this environment). |
