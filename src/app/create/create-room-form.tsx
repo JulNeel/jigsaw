@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
@@ -332,6 +333,10 @@ export function CreateRoomForm() {
             {linkCopied ? tCreate("linkCopied") : tCreate("copyLink")}
           </Button>
         </div>
+
+        <Button asChild className="min-h-11 w-full">
+          <Link href={successResult.inviteUrl}>{tCreate("goToRoom")}</Link>
+        </Button>
 
         <div className="flex gap-2">
           <a
