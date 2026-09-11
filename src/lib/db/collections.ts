@@ -322,14 +322,6 @@ export function createRoomCollections({
       // wrong guess.
       const speculativeVersion = expectedVersion + 1;
       ownLastKnownVersionByPieceId.set(pieceId, speculativeVersion);
-      // Recorded before dispatch so the failure branch below knows which
-      // Server Action this was without re-deriving it from `changes` a
-      // second time (`changes.placedRow`/`changes.rotation` haven't been
-      // read yet at that point structurally, but keeping the branch
-      // decision in one place — here — is simpler than repeating the same
-      // three-way check twice).
-      const isMove = changes.placedRow == null && changes.rotation === undefined;
-
       let result;
       if (changes.placedRow != null) {
         result = await placePiece({
@@ -371,13 +363,17 @@ export function createRoomCollections({
         if (ownLastKnownVersionByPieceId.get(pieceId) === speculativeVersion) {
           ownLastKnownVersionByPieceId.delete(pieceId);
         }
-        // Tells `ClusterGroupSprite`'s `optimisticAnchor` (if this piece is
-        // a Cluster's representative member) to stop trusting its guess
-        // immediately — see `move-conflict-events.ts`'s own comment for why
-        // this explicit signal replaced an earlier data-comparison guess.
-        if (isMove) {
-          emitMoveConflict(pieceId);
-        }
+        // Tells `ClusterGroupSprite`'s `optimisticAnchor`/`RoomCanvas`'s
+        // `predictedClusterLocks` (if this piece is a Cluster's
+        // representative member) to stop trusting their guess immediately —
+        // see `move-conflict-events.ts`'s own comment for why this explicit
+        // signal replaced an earlier data-comparison guess. Fires on *any*
+        // rejected write (move or place alike, Story 3.19) — a rejected
+        // Cluster Frame-lock attempt (`placePiece`) needs this signal just
+        // as much as a rejected plain reposition (`movePiece`) always did;
+        // gating it to moves only left `optimisticAnchor` itself with a
+        // latent gap for the Frame-lock case specifically.
+        emitMoveConflict(pieceId);
         // AD-6: the optimistic local mutation is simply abandoned — no
         // automatic retry that would overwrite server state — and the next
         // Realtime event for this piece (already in flight regardless)
