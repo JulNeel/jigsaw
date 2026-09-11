@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 3.17: Update the first-access tutorial for the new Canvas features
 
-Status: review
+Status: done
 
 ## Story
 

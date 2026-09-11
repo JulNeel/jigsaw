@@ -554,6 +554,23 @@ So that a one-finger slide never ambiguously moves the Canvas *or* a piece depen
 
 **Note — scope decision (2026-09-06), confirmed with the user before this story was written:** amends Story 3.3's own original mobile gesture spec (UX-DR15: "one-finger pan, pinch-zoom"), based on real usage — a one-finger slide being ambiguous between "move the Canvas" and "move a piece" (depending on whether the finger happened to land exactly on a piece) was reported as confusing, not a deliberate trade-off worth keeping. Adopts the touch model used by Procreate/Figma mobile/Concepts: one finger is exclusively for direct manipulation (a piece), two fingers exclusively for camera navigation (pan/zoom). The "or select" possibility for a one-finger touch on empty space (mentioned by the user) is explicitly deferred — this app has no selection concept today; revisit only if one gets added later.
 
+### Story 3.19: Optimistic Îlot lock-in
+
+As a Participant,
+I want an entire Îlot to snap visibly into the Frame the instant I drop it on a valid slot,
+So that locking in a whole Cluster feels as instant and confident as placing one loose piece already does.
+
+**Acceptance Criteria:**
+
+**Given** a Participant drags an Îlot (Cluster) and drops it onto a Frame position the client-side prediction (`predictFrameLock`) already believes will lock
+**When** the drop happens
+**Then** every member of that Îlot immediately renders individually placed at its own correct Frame slot — not as a rigid dragged Group sitting at the raw drop point — with the same instant, no-wait feel a solo piece's own optimistic Frame-lock already has
+**And** each member also gets the same green placement pulse a solo piece's confident lock already gets, not just the existing sound cue
+**And** if the server's own re-validation disagrees with the prediction (a genuine, rare conflict), every member reverts to its last confirmed state — still fused, still resting at the Cluster's true anchor — never left stuck floating at the wrong Frame position
+**And** this remains purely a rendering/interaction concern — FR6/AD-2's rule that the server is the sole authority for whether a Frame lock is real is completely unchanged; prediction only ever anticipates, never substitutes for, server validation
+
+**Note — scope decision (2026-09-11), confirmed with the user before this story was written:** this closes a gap flagged during Story 3.8/3.9's own code review (`deferred-work.md`, 2026-09-01) — today, locking a whole Cluster into the Frame optimistically updates only the representative member's own row, but the render-classification logic (`RoomCanvas`'s `soloPieces`/`membersByClusterId` split) keys purely on `clusterId`, which the optimistic mutation never touches — so in practice a predicted-successful Cluster lock currently shows **zero** visual change at all (no snap, no pulse) until the server's confirmed rows and Realtime's Cluster-row deletion arrive, noticeably later than the sound cue already playing. This is the harder half of the "optimistic feedback" work this session already did for a solo piece (Story 3.11) and for two-piece fusion (Story 3.13) — the same idiom (a local-only, never-persisted render override, never a write to the read-only `clusters` TanStack DB collection) applied to the one remaining gap in that family.
+
 ## Epic 4: Presence, History & Guest Conversion
 
 **FRs covered:** FR10, FR11, FR12, FR13 · **NFR5** (sync consistency) · **UX-DR:** Presence dot/avatar, `key-statistiques.html` (History), aria-live events
