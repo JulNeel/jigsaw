@@ -570,6 +570,103 @@ function SoloPieceSprite({
     if (!muted) {
       playWoodClick();
     }
+    // Bug fix (2026-09-11, user report: fusing a piece with an Îlot works
+    // outside the Frame but not inside): server-side, a Frame-lock attempt
+    // that doesn't validate still falls through to `repositionOrFuse`
+    // (`placePiece`'s own `restWithoutLocking`) — the *same* fusion check
+    // `movePiece` runs in free space. So landing near a Frame slot and
+    // genuinely touching another piece/Cluster there is a completely
+    // ordinary, expected outcome, not a corner case — the client's own
+    // prediction just never checked for it in that branch. Extracted so
+    // both the Frame-slot branch below and the free-space `else` branch
+    // can share it, rather than only the latter running it (the actual
+    // bug). Returns whether a genuine fusion was found (and its own
+    // chime/pulse/optimistic-grouping already handled) — the caller uses
+    // this to decide whether *its own* fallback feedback (a reject/overlap
+    // pulse, or nothing) still applies.
+    function checkFusionAt(point: Point): boolean {
+      const { outcome: fusionOutcome, candidates: fusionCandidates } = predictFusionOutcome({
+        draggedMembers: [
+          {
+            pieceId: piece.id,
+            gridRow: piece.gridRow,
+            gridCol: piece.gridCol,
+            rotation: piece.rotation,
+            screenX: point.x,
+            screenY: point.y,
+          },
+        ],
+        stationaryMembers: otherFreePieceScreenPositions(
+          pieces,
+          new Set([piece.id]),
+          clustersById,
+          frameWidth,
+          frameHeight,
+          tileWidth,
+          tileHeight,
+        ),
+        tileWidth,
+        tileHeight,
+        knownPieces: pieces,
+      });
+      if (fusionOutcome !== "genuine") {
+        return false;
+      }
+      if (!muted) {
+        playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+      }
+      // User feedback (2026-09-04): "la fusion visuelle pourrait au moins
+      // être optimiste" — a predicted-genuine fusion already visually
+      // rests exactly at the touching drop point (correct either way),
+      // but nothing signaled "this connected" the way a Frame lock's
+      // green pulse does, until the server's confirmed `cluster_id`
+      // eventually re-renders the pair as a `ClusterGroupSprite` —
+      // noticeably later than the sound. This reuses that exact same
+      // pulse mechanism, purely cosmetic acknowledgment.
+      onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, point);
+
+      // Story 3.13: the actual optimistic *grouping* (drag the pair as
+      // one Îlot immediately) — deliberately scoped to the simplest,
+      // most common case: this piece fusing with exactly one other
+      // *solo* piece. A dragged Cluster, or a stationary piece already
+      // part of a Cluster, needs re-basing every existing member's own
+      // offset (`repositionOrFuse`'s own multi-member merge math) —
+      // deliberately out of scope here (this story's own Task 4
+      // allowance); those cases still get the pulse/chime above, just
+      // not the grouped-drag behavior yet.
+      const matchedStationaryId = fusionCandidates[0]?.b.pieceId;
+      const matchedStationaryPiece =
+        fusionCandidates.length === 1 && matchedStationaryId
+          ? pieces.find((p) => p.id === matchedStationaryId)
+          : undefined;
+      if (matchedStationaryPiece && matchedStationaryPiece.clusterId == null) {
+        const minGridRow = Math.min(piece.gridRow, matchedStationaryPiece.gridRow);
+        const minGridCol = Math.min(piece.gridCol, matchedStationaryPiece.gridCol);
+        const tempClusterId = crypto.randomUUID();
+        onGenuineFusion({
+          tempClusterId,
+          memberIds: [piece.id, matchedStationaryPiece.id],
+          // Mirrors `repositionOrFuse`'s own `mergedAnchorX/Y` formula
+          // exactly (`x - (draggedMember.gridCol - minGridCol) *
+          // tileWidth`, and the row equivalent) — `piece` is the
+          // dragged member here, at `point`.
+          anchorX: point.x - (piece.gridCol - minGridCol) * tileWidth,
+          anchorY: point.y - (piece.gridRow - minGridRow) * tileHeight,
+          offsetsByPieceId: new Map([
+            [piece.id, { row: piece.gridRow - minGridRow, col: piece.gridCol - minGridCol }],
+            [
+              matchedStationaryPiece.id,
+              {
+                row: matchedStationaryPiece.gridRow - minGridRow,
+                col: matchedStationaryPiece.gridCol - minGridCol,
+              },
+            ],
+          ]),
+        });
+        markPredictedFusion(piece.id, tempClusterId);
+      }
+      return true;
+    }
     const slot = nearestFrameSlot(
       dropPoint,
       frameWidth,
@@ -643,10 +740,15 @@ function SoloPieceSprite({
           y: -frameHeight / 2 + slot.row * tileHeight + tileHeight / 2,
         };
         onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, slotCenter);
-      } else if (outcome === "rejected") {
-        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_REJECTED_COLOR, dropPoint);
-      } else if (outcome === "overlap") {
-        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_OVERLAP_COLOR, dropPoint);
+      } else if (!checkFusionAt(dropPoint)) {
+        // Only shown when this drop *isn't* a genuine fusion either — see
+        // `checkFusionAt`'s own comment for why a rejected/overlapping
+        // Frame-lock attempt can still genuinely fuse server-side.
+        if (outcome === "rejected") {
+          onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_REJECTED_COLOR, dropPoint);
+        } else if (outcome === "overlap") {
+          onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_OVERLAP_COLOR, dropPoint);
+        }
       }
       collection.update(piece.id, (draft) => {
         draft.placedRow = slot.row;
@@ -659,91 +761,10 @@ function SoloPieceSprite({
         draft.scatterY = dropPoint.y;
       });
     } else {
-      // Not near a Frame slot — still worth checking whether this drop
-      // brought the piece into genuine (or false) contact with another
-      // free piece/Cluster, for the success/reject chime only; the actual
-      // fusion decision is still made exclusively server-side (`movePiece`
-      // → `repositionOrFuse`), this is purely cosmetic prediction, same
-      // spirit as `predictFrameLock`.
-      const { outcome: fusionOutcome, candidates: fusionCandidates } = predictFusionOutcome({
-        draggedMembers: [
-          {
-            pieceId: piece.id,
-            gridRow: piece.gridRow,
-            gridCol: piece.gridCol,
-            rotation: piece.rotation,
-            screenX: dropPoint.x,
-            screenY: dropPoint.y,
-          },
-        ],
-        stationaryMembers: otherFreePieceScreenPositions(
-          pieces,
-          new Set([piece.id]),
-          clustersById,
-          frameWidth,
-          frameHeight,
-          tileWidth,
-          tileHeight,
-        ),
-        tileWidth,
-        tileHeight,
-        knownPieces: pieces,
-      });
-      if (fusionOutcome === "genuine") {
-        if (!muted) {
-          playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
-        }
-        // User feedback (2026-09-04): "la fusion visuelle pourrait au moins
-        // être optimiste" — a predicted-genuine fusion already visually
-        // rests exactly at the touching drop point (correct either way),
-        // but nothing signaled "this connected" the way a Frame lock's
-        // green pulse does, until the server's confirmed `cluster_id`
-        // eventually re-renders the pair as a `ClusterGroupSprite` —
-        // noticeably later than the sound. This reuses that exact same
-        // pulse mechanism, purely cosmetic acknowledgment.
-        onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
-
-        // Story 3.13: the actual optimistic *grouping* (drag the pair as
-        // one Îlot immediately) — deliberately scoped to the simplest,
-        // most common case: this piece fusing with exactly one other
-        // *solo* piece. A dragged Cluster, or a stationary piece already
-        // part of a Cluster, needs re-basing every existing member's own
-        // offset (`repositionOrFuse`'s own multi-member merge math) —
-        // deliberately out of scope here (this story's own Task 4
-        // allowance); those cases still get the pulse/chime above, just
-        // not the grouped-drag behavior yet.
-        const matchedStationaryId = fusionCandidates[0]?.b.pieceId;
-        const matchedStationaryPiece =
-          fusionCandidates.length === 1 && matchedStationaryId
-            ? pieces.find((p) => p.id === matchedStationaryId)
-            : undefined;
-        if (matchedStationaryPiece && matchedStationaryPiece.clusterId == null) {
-          const minGridRow = Math.min(piece.gridRow, matchedStationaryPiece.gridRow);
-          const minGridCol = Math.min(piece.gridCol, matchedStationaryPiece.gridCol);
-          const tempClusterId = crypto.randomUUID();
-          onGenuineFusion({
-            tempClusterId,
-            memberIds: [piece.id, matchedStationaryPiece.id],
-            // Mirrors `repositionOrFuse`'s own `mergedAnchorX/Y` formula
-            // exactly (`x - (draggedMember.gridCol - minGridCol) *
-            // tileWidth`, and the row equivalent) — `piece` is the
-            // dragged member here, at `dropPoint`.
-            anchorX: dropPoint.x - (piece.gridCol - minGridCol) * tileWidth,
-            anchorY: dropPoint.y - (piece.gridRow - minGridRow) * tileHeight,
-            offsetsByPieceId: new Map([
-              [piece.id, { row: piece.gridRow - minGridRow, col: piece.gridCol - minGridCol }],
-              [
-                matchedStationaryPiece.id,
-                {
-                  row: matchedStationaryPiece.gridRow - minGridRow,
-                  col: matchedStationaryPiece.gridCol - minGridCol,
-                },
-              ],
-            ]),
-          });
-          markPredictedFusion(piece.id, tempClusterId);
-        }
-      }
+      // Not near a Frame slot — same fusion check as the Frame-slot branch
+      // above, just unconditional here since there's no competing lock
+      // outcome to prefer.
+      checkFusionAt(dropPoint);
       collection.update(piece.id, (draft) => {
         draft.scatterX = dropPoint.x;
         draft.scatterY = dropPoint.y;
@@ -951,6 +972,60 @@ function ClusterGroupSprite({
     if (!muted) {
       playWoodClick();
     }
+    // Bug fix (2026-09-11, user report: fusing a piece with an Îlot works
+    // outside the Frame but not inside) — same reasoning and shared shape
+    // as `SoloPieceSprite`'s own `checkFusionAt`: `placePiece`'s own
+    // rejection fallback still attempts this exact fusion check
+    // server-side, so a Frame-slot drop that doesn't lock must predict it
+    // too, not just a free-space drop. Returns whether a genuine fusion was
+    // found (chime/pulse already handled) — no optimistic *grouping* here,
+    // matching this function's own existing, deliberate scope limit below.
+    function checkFusionAt(point: Point): boolean {
+      const memberIds = new Set(members.map((m) => m.id));
+      // Story 3.13: only the pulse/chime acknowledgment below is
+      // instant here — the optimistic *grouping* behavior is deliberately
+      // scoped to a solo piece fusing with exactly one other solo piece
+      // (see `SoloPieceSprite`'s own fusion branch); dragging an *existing*
+      // Cluster into a new fusion would need re-basing every current
+      // member's own offset through the same multi-member merge math
+      // `repositionOrFuse` does server-side, which is out of scope for this
+      // story (its own Task 4 explicitly allows deferring the compounding
+      // case). The confirmed fusion still arrives normally via Realtime,
+      // just without the immediate grouped-drag feedback in this specific
+      // case.
+      const { outcome: fusionOutcome } = predictFusionOutcome({
+        draggedMembers: members.map((m) => ({
+          pieceId: m.id,
+          gridRow: m.gridRow,
+          gridCol: m.gridCol,
+          rotation: m.rotation,
+          screenX: point.x + (m.clusterOffsetCol! - representativeMember.clusterOffsetCol!) * tileWidth,
+          screenY: point.y + (m.clusterOffsetRow! - representativeMember.clusterOffsetRow!) * tileHeight,
+        })),
+        stationaryMembers: otherFreePieceScreenPositions(
+          pieces,
+          memberIds,
+          clustersById,
+          frameWidth,
+          frameHeight,
+          tileWidth,
+          tileHeight,
+        ),
+        tileWidth,
+        tileHeight,
+        knownPieces: pieces,
+      });
+      if (fusionOutcome !== "genuine") {
+        return false;
+      }
+      if (!muted) {
+        playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
+      }
+      // Same instant, purely cosmetic acknowledgment as
+      // `SoloPieceSprite`'s own fusion branch — see its comment for why.
+      onInstantFrameLockOutcome(representativeMember.id, PLACEMENT_PULSE_LOCKED_COLOR, point);
+      return true;
+    }
     const slot = nearestFrameSlot(
       dropPoint,
       frameWidth,
@@ -1005,10 +1080,7 @@ function ClusterGroupSprite({
       const predictedLock = outcome === "locked";
       markPredictedLock(representativeMember.id, predictedLock);
       // Only a genuine validation attempt gets a success chime, and only on
-      // success — see `SoloPieceSprite`'s handleDragEnd. No colored pulse
-      // here (yet) — a Cluster lock-in's own optimistic-feedback gap is a
-      // pre-existing, already-tracked limitation (`deferred-work.md`), not
-      // something this change expands the scope of.
+      // success — see `SoloPieceSprite`'s handleDragEnd.
       if (predictedLock) {
         // Code review fix (2026-09-02): without this, the representative
         // member's own confirmed `subscribePiecePlaced` event (which every
@@ -1025,6 +1097,11 @@ function ClusterGroupSprite({
         if (!muted) {
           playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
         }
+      } else {
+        // Bug fix (2026-09-11): even though this drop landed near a Frame
+        // slot and didn't lock there, it may still have genuinely touched a
+        // nearby piece/Cluster — see `checkFusionAt`'s own comment above.
+        checkFusionAt(dropPoint);
       }
       collection.update(representativeMember.id, (draft) => {
         draft.placedRow = slot.row;
@@ -1036,50 +1113,9 @@ function ClusterGroupSprite({
         draft.scatterY = dropPoint.y;
       });
     } else {
-      // Not near a Frame slot — same cosmetic-only fusion-outcome check as
-      // `SoloPieceSprite`, applied to every member of the Cluster at once.
-      const memberIds = new Set(members.map((m) => m.id));
-      // Story 3.13: only the pulse/chime acknowledgment below is
-      // instant here — the optimistic *grouping* behavior is deliberately
-      // scoped to a solo piece fusing with exactly one other solo piece
-      // (see `SoloPieceSprite`'s own fusion branch); dragging an *existing*
-      // Cluster into a new fusion would need re-basing every current
-      // member's own offset through the same multi-member merge math
-      // `repositionOrFuse` does server-side, which is out of scope for this
-      // story (its own Task 4 explicitly allows deferring the compounding
-      // case). The confirmed fusion still arrives normally via Realtime,
-      // just without the immediate grouped-drag feedback in this specific
-      // case.
-      const { outcome: fusionOutcome } = predictFusionOutcome({
-        draggedMembers: members.map((m) => ({
-          pieceId: m.id,
-          gridRow: m.gridRow,
-          gridCol: m.gridCol,
-          rotation: m.rotation,
-          screenX: dropPoint.x + (m.clusterOffsetCol! - representativeMember.clusterOffsetCol!) * tileWidth,
-          screenY: dropPoint.y + (m.clusterOffsetRow! - representativeMember.clusterOffsetRow!) * tileHeight,
-        })),
-        stationaryMembers: otherFreePieceScreenPositions(
-          pieces,
-          memberIds,
-          clustersById,
-          frameWidth,
-          frameHeight,
-          tileWidth,
-          tileHeight,
-        ),
-        tileWidth,
-        tileHeight,
-        knownPieces: pieces,
-      });
-      if (fusionOutcome === "genuine") {
-        if (!muted) {
-          playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
-        }
-        // Same instant, purely cosmetic acknowledgment as
-        // `SoloPieceSprite`'s own fusion branch — see its comment for why.
-        onInstantFrameLockOutcome(representativeMember.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
-      }
+      // Not near a Frame slot — same fusion check as the Frame-slot branch
+      // above, applied to every member of the Cluster at once.
+      checkFusionAt(dropPoint);
       collection.update(representativeMember.id, (draft) => {
         draft.scatterX = dropPoint.x;
         draft.scatterY = dropPoint.y;
