@@ -281,7 +281,11 @@ export function predictDropOutcome(params: {
   }
 
   if (genuinelyFused) {
-    return { outcome: "fused", candidates };
+    // `mergedMemberIds` here (unlike `placedSlotByPieceId`) is the caller's
+    // only way to learn the *fully expanded* touched membership (a touched
+    // piece's whole Cluster, not just the one directly-touched piece) — it
+    // has no other reason to duplicate that expansion itself.
+    return { outcome: "fused", candidates, mergedMemberIds: [...mergedIds] };
   }
   if (candidates.length > 0) {
     return { outcome: "false-contact", candidates };

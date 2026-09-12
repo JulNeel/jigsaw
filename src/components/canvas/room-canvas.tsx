@@ -313,20 +313,28 @@ function PieceSprite({
   );
 }
 
-// Story 3.13: a purely local, never-persisted "predicted fusion" — two
-// (currently only ever exactly two, see `SoloPieceSprite`'s own fusion
-// branch) pieces a client-side prediction already believes just fused,
-// rendered and draggable as one Îlot immediately, before the server's
-// confirmed `cluster_id` arrives. Deliberately never written to the
-// `clusters` TanStack DB collection (read-only from the client by design —
-// see `collections.ts`'s own comment) — kept entirely in `RoomCanvas`'s own
-// state instead, mirroring `pendingRestOverride`/`optimisticAnchor`'s own
-// "local-only override" idiom. Module-level (not declared inside
-// `RoomCanvas`) so `SoloPieceSprite` — a separate component, receiving this
-// only through a callback prop — can reference the same type.
+// Story 3.13 (extended, 2026-09-12): a purely local, never-persisted
+// "predicted fusion" — every piece a client-side prediction already
+// believes just fused together, rendered and draggable as one Îlot
+// immediately, before the server's confirmed `cluster_id` arrives.
+// Originally scoped to exactly two solo pieces (`SoloPieceSprite`'s own
+// fusion branch); `ClusterGroupSprite` now also produces one of these when
+// an entire dragged Îlot genuinely touches another piece/Îlot — closing the
+// "no optimistic feedback for an Îlot+Îlot fusion" gap (user report,
+// 2026-09-12: with real network latency, that silent wait tempted
+// re-dragging before confirmation landed, racing the client's own prior
+// write — see `move-conflict-events.ts`'s established "own rapid actions"
+// lesson). `memberIds` is therefore an arbitrary-length list, not a fixed
+// pair. Deliberately never written to the `clusters` TanStack DB collection
+// (read-only from the client by design — see `collections.ts`'s own
+// comment) — kept entirely in `RoomCanvas`'s own state instead, mirroring
+// `pendingRestOverride`/`optimisticAnchor`'s own "local-only override"
+// idiom. Module-level (not declared inside `RoomCanvas`) so both sprite
+// components — receiving this only through a callback prop — can reference
+// the same type.
 type PredictedFusion = {
   tempClusterId: string;
-  memberIds: readonly [string, string];
+  memberIds: readonly string[];
   anchorX: number;
   anchorY: number;
   offsetsByPieceId: ReadonlyMap<string, { row: number; col: number }>;
@@ -625,6 +633,7 @@ function ClusterGroupSprite({
   onDragEnd,
   onInstantFrameLockOutcome,
   onPredictedClusterLock,
+  onGenuineFusion,
   highlightFramePieces,
 }: {
   cluster: RoomDetailCluster;
@@ -643,6 +652,11 @@ function ClusterGroupSprite({
   // Story 3.19: called only when a Frame-slot drop's own `predictedLock` is
   // `true` — see `handleDragEnd`'s own comment for what it carries.
   onPredictedClusterLock: (prediction: PredictedClusterLock) => void;
+  // 2026-09-12: called when the whole dragged Îlot genuinely fuses with
+  // another piece/Îlot — see `handleDragEnd`'s own comment for why this
+  // closes a real gap (no optimistic feedback previously existed for an
+  // Îlot+Îlot fusion at all).
+  onGenuineFusion: (prediction: PredictedFusion) => void;
   // Story 3.16: evaluated per member below, not once for the whole Cluster
   // — a mixed Cluster (one frame piece + one interior piece fused together)
   // is a normal case, since fusion is adjacency-based, not shape-based.
@@ -826,20 +840,44 @@ function ClusterGroupSprite({
         onInstantFrameLockOutcome(pieceId, PLACEMENT_PULSE_LOCKED_COLOR, frameSlotCenter(target.row, target.col, geom));
       }
     } else if (prediction.outcome === "fused") {
-      // Story 3.13: only the pulse/chime acknowledgment is instant here —
-      // the optimistic *grouping* behavior is deliberately scoped to a solo
-      // piece fusing with exactly one other solo piece (see
-      // `SoloPieceSprite`'s own fusion branch); dragging an *existing*
-      // Cluster into a new fusion would need re-basing every current
-      // member's own offset through the same multi-member merge math
-      // `repositionFuseOrPlace` does server-side, out of scope here (Story
-      // 3.13's own Task 4 explicitly allows deferring the compounding
-      // case). The confirmed fusion still arrives normally via Realtime,
-      // just without the immediate grouped-drag feedback in this case.
       if (!muted) {
         playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
       }
       onInstantFrameLockOutcome(representativeMember.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
+
+      // User report (2026-09-12): with real network latency, an Îlot+Îlot
+      // fusion had no optimistic feedback at all (unlike a solo+solo
+      // fusion) — the silent wait tempted re-dragging before confirmation
+      // landed, racing the client's own prior write (the exact "own rapid
+      // actions" class of issue `move-conflict-events.ts` already exists
+      // to guard against elsewhere). Mirrors `repositionFuseOrPlace`'s own
+      // merge math exactly: minGridRow/minGridCol across the *full* merged
+      // membership (this Cluster's own members plus whatever was
+      // genuinely touched, already expanded to its own whole Cluster by
+      // `predictDropOutcome`), anchor recovered from the representative
+      // member's own new screen position.
+      const mergedIds = prediction.mergedMemberIds!;
+      const memberById = new Map(members.map((m) => [m.id, m]));
+      const mergedGridPositions = mergedIds.map((id) => {
+        const known = memberById.get(id) ?? pieces.find((p) => p.id === id)!;
+        return { id, gridRow: known.gridRow, gridCol: known.gridCol };
+      });
+      const minGridRow = Math.min(...mergedGridPositions.map((m) => m.gridRow));
+      const minGridCol = Math.min(...mergedGridPositions.map((m) => m.gridCol));
+      const tempClusterId = crypto.randomUUID();
+      onGenuineFusion({
+        tempClusterId,
+        memberIds: mergedIds,
+        anchorX: dropPoint.x - (representativeMember.gridCol - minGridCol) * tileWidth,
+        anchorY: dropPoint.y - (representativeMember.gridRow - minGridRow) * tileHeight,
+        offsetsByPieceId: new Map(
+          mergedGridPositions.map((m) => [
+            m.id,
+            { row: m.gridRow - minGridRow, col: m.gridCol - minGridCol },
+          ]),
+        ),
+      });
+      markPredictedFusion(representativeMember.id, tempClusterId);
     } else if (prediction.outcome === "false-contact") {
       onInstantFrameLockOutcome(representativeMember.id, PLACEMENT_PULSE_REJECTED_COLOR, dropPoint);
     } else if (prediction.outcome === "placement-blocked") {
@@ -1419,6 +1457,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
           ? activePredictedClusterLocks.find((pcl) => pcl.clusterId === piece.clusterId)
           : undefined;
       const predictedTarget = predictedLock?.targetByPieceId.get(piece.id);
+      const tempClusterId = predictedClusterIdByPieceId.get(piece.id);
       if (piece.clusterId != null && predictedTarget) {
         // A clone, not the live piece — the real row's own `placedRow`/
         // `clusterId` are still exactly what they were before the drop
@@ -1426,20 +1465,22 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
         // mutated, and never `clusterId` at all — see `ClusterGroupSprite`'s
         // own Dev Notes). Only rendering reads this clone.
         solo.push({ ...piece, placedRow: predictedTarget.row, placedCol: predictedTarget.col });
-      } else if (piece.clusterId != null && clustersById.has(piece.clusterId)) {
-        const members = byCluster.get(piece.clusterId) ?? [];
-        members.push(piece);
-        byCluster.set(piece.clusterId, members);
-      } else if (piece.clusterId == null && predictedClusterIdByPieceId.has(piece.id)) {
-        const tempClusterId = predictedClusterIdByPieceId.get(piece.id)!;
+      } else if (tempClusterId != null) {
+        // Story 3.13 (extended, 2026-09-12): covers both a still-solo piece
+        // anticipating a brand-new fusion (its `clusterId` is already
+        // `null`) AND a piece that's already genuinely part of a *real*
+        // Cluster/placed on its own but just got swept into a predicted
+        // Îlot+Îlot fusion — its real `clusterId` is ignored in favor of
+        // the prediction until the real merge actually confirms, exactly
+        // mirroring `predictedLock`'s own override one branch above.
         const predicted = activePredictedFusions.find((pf) => pf.tempClusterId === tempClusterId)!;
         const offset = predicted.offsetsByPieceId.get(piece.id)!;
         // A clone, not the live piece — `ClusterGroupSprite` reads
         // `clusterOffsetRow`/`clusterOffsetCol` directly off each member,
-        // and the real piece's own fields are still `null` until the
-        // server actually confirms the fusion. Only rendering reads this
-        // clone; `collection.update(representativeMember.id, ...)` still
-        // targets the real piece by `id`, which the clone preserves.
+        // and the real piece's own fields are still whatever they were
+        // until the server actually confirms the fusion. Only rendering
+        // reads this clone; `collection.update(representativeMember.id, ...)`
+        // still targets the real piece by `id`, which the clone preserves.
         const patched: RoomDetailPiece = {
           ...piece,
           clusterId: tempClusterId,
@@ -1449,6 +1490,10 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
         const members = byCluster.get(tempClusterId) ?? [];
         members.push(patched);
         byCluster.set(tempClusterId, members);
+      } else if (piece.clusterId != null && clustersById.has(piece.clusterId)) {
+        const members = byCluster.get(piece.clusterId) ?? [];
+        members.push(piece);
+        byCluster.set(piece.clusterId, members);
       } else if (piece.clusterId == null) {
         solo.push(piece);
       }
@@ -2060,6 +2105,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
                 }}
                 onInstantFrameLockOutcome={triggerPulse}
                 onPredictedClusterLock={addPredictedClusterLock}
+                onGenuineFusion={addPredictedFusion}
                 highlightFramePieces={highlightFramePieces}
               />
             ),
