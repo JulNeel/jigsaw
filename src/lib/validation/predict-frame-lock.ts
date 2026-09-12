@@ -5,6 +5,7 @@ import {
 } from "./validate-placement";
 import { overlapsAnyFreePiece, type ScreenPoint } from "./validate-overlap";
 import { computeTrueNeighborsByDirection, type GridPositioned } from "./true-neighbors";
+import { frameSlotCenter } from "./frame-geometry";
 import { classifyPieceShape, type PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 
 export type PredictableKnownPiece = GridPositioned & {
@@ -120,8 +121,6 @@ export function predictFrameLock(params: {
     gridCols,
     tileWidth,
     tileHeight,
-    frameWidth,
-    frameHeight,
     knownPieces,
     otherFreePiecePositions,
   } = params;
@@ -206,10 +205,9 @@ export function predictFrameLock(params: {
     }
   }
 
-  const slotCenters = targets.map((t) => ({
-    x: -frameWidth / 2 + t.targetCol * tileWidth + tileWidth / 2,
-    y: -frameHeight / 2 + t.targetRow * tileHeight + tileHeight / 2,
-  }));
+  const slotCenters = targets.map((t) =>
+    frameSlotCenter(t.targetRow, t.targetCol, { gridRows, gridCols, tileWidth, tileHeight }),
+  );
   for (const slotCenter of slotCenters) {
     if (overlapsAnyFreePiece(slotCenter, otherFreePiecePositions, tileWidth, tileHeight)) {
       return { outcome: "overlap" };

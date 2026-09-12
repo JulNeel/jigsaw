@@ -1,5 +1,16 @@
 import { DIRECTION_OFFSETS, type OrthogonalDirection } from "./true-neighbors";
 
+// A drop counts as "genuinely touching" a neighbor within this fraction of a
+// tile's own size — a snapping window, not a loose "nearby" radius (Story
+// 3.8's AC: sorting pieces near each other must have zero effect unless
+// they actually touch). Deliberately tuned during manual verification, not
+// spec-mandated. Widened 0.3 → 0.45 (user feedback, 2026-09-06: the fusion
+// contact window felt too tight). Single source of truth — both
+// `piece-actions.ts` (server) and `predict-fusion.ts` (client mirror) used
+// to keep their own separately-duplicated copy of this exact number, which
+// only worked as long as no one ever edited one without the other.
+export const CONTACT_TOLERANCE_FACTOR = 0.45;
+
 export type FusionPieceInfo = {
   pieceId: string;
   gridRow: number;

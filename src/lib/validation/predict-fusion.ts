@@ -1,17 +1,11 @@
 import {
+  CONTACT_TOLERANCE_FACTOR,
   findContactCandidates,
   validateFusion,
   type ContactCandidate,
   type ScreenPositioned,
 } from "./validate-fusion";
 import { computeTrueNeighborIds, type GridPositioned } from "./true-neighbors";
-
-// Mirrors `repositionOrFuse`'s own tolerance exactly (`piece-actions.ts`) —
-// a snapping window, not a loose "nearby" radius (Story 3.8's AC that
-// sorting pieces near each other must have zero effect unless they
-// genuinely touch). Widened 0.3 → 0.45 alongside that file's own copy
-// (user feedback, 2026-09-06) — must stay numerically identical to it.
-const CONTACT_TOLERANCE_FACTOR = 0.45;
 
 export type PredictedFusionOutcome = "none" | "genuine" | "false-contact";
 

@@ -38,6 +38,7 @@ import {
 import { triggerPlacementHaptic } from "@/lib/audio/haptics";
 import { predictFrameLock } from "@/lib/validation/predict-frame-lock";
 import { predictFusionOutcome } from "@/lib/validation/predict-fusion";
+import { frameSlotCenter } from "@/lib/validation/frame-geometry";
 import { subscribeFrameComplete } from "@/lib/rooms/frame-completion-events";
 import { computePieceEdgeShapes } from "@/lib/piece-cutting/compute-piece-edge-shapes";
 import { buildPieceOutlinePath, drawPieceOutlinePath } from "@/lib/piece-cutting/build-piece-outline-path";
@@ -168,10 +169,12 @@ function pieceRenderPosition(
   tileHeight: number,
 ): Point {
   if (piece.placedRow != null && piece.placedCol != null) {
-    return {
-      x: -frameWidth / 2 + piece.placedCol * tileWidth + tileWidth / 2,
-      y: -frameHeight / 2 + piece.placedRow * tileHeight + tileHeight / 2,
-    };
+    return frameSlotCenter(piece.placedRow, piece.placedCol, {
+      gridRows: frameHeight / tileHeight,
+      gridCols: frameWidth / tileWidth,
+      tileWidth,
+      tileHeight,
+    });
   }
   if (piece.clusterId != null) {
     const cluster = clustersById.get(piece.clusterId);
@@ -753,10 +756,12 @@ function SoloPieceSprite({
           // unstaggered pair reads as one blurred sound, not two.
           playSuccessChime(SUCCESS_CHIME_STAGGER_SECONDS);
         }
-        const slotCenter = {
-          x: -frameWidth / 2 + slot.col * tileWidth + tileWidth / 2,
-          y: -frameHeight / 2 + slot.row * tileHeight + tileHeight / 2,
-        };
+        const slotCenter = frameSlotCenter(slot.row, slot.col, {
+          gridRows,
+          gridCols,
+          tileWidth,
+          tileHeight,
+        });
         onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, slotCenter);
       } else if (!checkFusionAt(dropPoint)) {
         // Only shown when this drop *isn't* a genuine fusion either — see
@@ -1148,10 +1153,12 @@ function ClusterGroupSprite({
         });
         for (const m of members) {
           const target = targetByPieceId.get(m.id)!;
-          const slotCenter = {
-            x: -frameWidth / 2 + target.col * tileWidth + tileWidth / 2,
-            y: -frameHeight / 2 + target.row * tileHeight + tileHeight / 2,
-          };
+          const slotCenter = frameSlotCenter(target.row, target.col, {
+            gridRows,
+            gridCols,
+            tileWidth,
+            tileHeight,
+          });
           onInstantFrameLockOutcome(m.id, PLACEMENT_PULSE_LOCKED_COLOR, slotCenter);
         }
       } else {
