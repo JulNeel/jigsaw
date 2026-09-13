@@ -2,11 +2,14 @@
 
 import { getTranslations } from "next-intl/server";
 import { getAuthorizedUser } from "@/lib/auth/get-authorized-user";
+import { createClient as createSupabaseServerClient } from "@/lib/auth/supabase-server";
 import { pgPool } from "@/lib/db/pg";
 import { generateInviteSlug } from "@/lib/rooms/generate-invite-slug";
 import { isUniqueSlugViolation } from "@/lib/rooms/is-unique-slug-violation";
 import { computeAdjacency } from "@/lib/piece-cutting/compute-adjacency";
 import { classifyPieceShape } from "@/lib/piece-cutting/classify-piece-shape";
+
+const STORAGE_BUCKET = "piece-tiles";
 
 // `shapeType` is deliberately NOT part of this payload — it's recomputed
 // server-side (below) from (row, col, grid), the same authoritative
@@ -207,4 +210,73 @@ export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResu
   }
 
   return { success: false, error: { message: t("genericError") } };
+}
+
+export type DeleteRoomResult =
+  | { success: true }
+  | { success: false; error: { message: string } };
+
+/**
+ * Deletes a Room the current user owns — every `piece`/`piece_adjacency`/
+ * `cluster` row cascades automatically (`on delete cascade` on each of
+ * their `room_id` foreign keys, see the `rooms`/`cluster` migrations), so
+ * the Postgres delete alone is sufficient at the data-model level. Scoped
+ * by `created_by`, not just `id` — never trust a client-supplied Room id
+ * alone to authorize a destructive write (same reasoning as `createRoom`
+ * writing `created_by` itself, just the read-side mirror of it).
+ */
+export async function deleteRoom(roomId: string): Promise<DeleteRoomResult> {
+  const t = await getTranslations("Home");
+
+  const auth = await getAuthorizedUser();
+  if ("error" in auth) {
+    return { success: false, error: { message: t("notSignedIn") } };
+  }
+
+  let client;
+  try {
+    client = await pgPool.connect();
+  } catch (err) {
+    console.error("deleteRoom: pgPool.connect() failed:", err);
+    return { success: false, error: { message: t("deleteError") } };
+  }
+
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `delete from room where id = $1 and created_by = $2 returning id`,
+      [roomId, auth.user.id],
+    );
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return { success: false, error: { message: t("deleteNotFound") } };
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("deleteRoom failed:", err);
+    return { success: false, error: { message: t("deleteError") } };
+  } finally {
+    client.release();
+  }
+
+  // Best-effort Storage cleanup, after the fact — the Room is already gone
+  // from the database at this point (the only state that actually matters
+  // for "did the delete work"); a failure here just leaves orphaned tile
+  // files behind, same "log and move on" tolerance as `removePieceTiles`
+  // elsewhere in this file's own sibling module, never blocking or
+  // rolling back the real (already-committed) deletion.
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: files } = await supabase.storage.from(STORAGE_BUCKET).list(roomId);
+    if (files && files.length > 0) {
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove(files.map((file) => `${roomId}/${file.name}`));
+    }
+  } catch (err) {
+    console.warn("deleteRoom: Storage cleanup failed:", err);
+  }
+
+  return { success: true };
 }

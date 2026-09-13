@@ -24,7 +24,16 @@
     "roomComplete": "Terminé",
     "roomOnline": "{count} en ligne",
     "loadErrorTitle": "Impossible de charger vos Salons",
-    "loadErrorBody": "Une erreur est survenue. Rechargez la page pour réessayer."
+    "loadErrorBody": "Une erreur est survenue. Rechargez la page pour réessayer.",
+    "deleteRoomAriaLabel": "Supprimer « {name} »",
+    "deleteConfirmTitle": "Supprimer ce Salon ?",
+    "deleteConfirmBody": "Toutes les pièces et l'avancement de « {name} » seront définitivement perdus pour tous les Participants.",
+    "deleteConfirmCancel": "Annuler",
+    "deleteConfirmSubmit": "Supprimer",
+    "deleteConfirmSubmitPending": "Suppression…",
+    "notSignedIn": "Vous devez être connecté pour supprimer un salon.",
+    "deleteError": "Impossible de supprimer ce salon. Réessayez.",
+    "deleteNotFound": "Ce salon n'existe plus ou ne vous appartient pas."
   },
   "Rooms": {
     "progress": "{piecesPlaced} / {pieceCount} pièces posées",
