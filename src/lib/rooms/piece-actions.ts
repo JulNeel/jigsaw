@@ -4,17 +4,19 @@ import type { PoolClient } from "pg";
 import { pgPool } from "@/lib/db/pg";
 import { ERROR_CODES, type ErrorCode } from "@/lib/errors";
 import {
-  canBootstrapWithoutNeighbor,
-  validatePieceOrientationAndShape,
-  validatePlacementNeighbors,
-} from "@/lib/validation/validate-placement";
-import {
+  CONTACT_TOLERANCE_FACTOR,
   findContactCandidates,
   validateFusion,
   type ScreenPositioned,
 } from "@/lib/validation/validate-fusion";
 import { overlapsAnyFreePiece } from "@/lib/validation/validate-overlap";
-import { directionFromDelta, type OrthogonalDirection } from "@/lib/validation/true-neighbors";
+import { findCornerAnchor, type AnchorCandidateMember } from "@/lib/validation/validate-corner-anchor";
+import {
+  computeContagionTargets,
+  resolvePlacementAnchor,
+  type ContagionMember,
+} from "@/lib/validation/validate-contagion";
+import { frameSlotCenter, type FrameGeometry } from "@/lib/validation/frame-geometry";
 import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 
 // No auth gate on any of these — placing/moving/rotating/fusing a piece is
@@ -23,15 +25,15 @@ import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 // compte"). Room *creation* is gated (Story 2.1); playing is not.
 
 export type PieceActionResult =
-  // `fused` mirrors `placed`'s own role from Story 3.11 (AC #4), for Story
-  // 3.13's own analogous case: it tells the client whether this specific
-  // write actually fused the dragged group with another piece/Cluster —
-  // never inferred from position/version, always the transaction's own
-  // ground truth (`repositionOrFuse`'s own return). Present whenever a
-  // reposition attempt happened at all (`movePiece`, and `placePiece`'s own
-  // fallback when a Frame lock didn't validate) — absent only for actions
-  // that never call `repositionOrFuse` (`rotatePiece`, and `placePiece`'s
-  // successful-lock path, which never attempts a fusion).
+  // `placed`/`fused` are the transaction's own ground truth, never inferred
+  // from position/version — `movePiece` is now the single drag-end Server
+  // Action, and every call attempts a reposition/fuse/place via
+  // `repositionFuseOrPlace`, so both fields are always present on success.
+  // `fused` mirrors `placed`'s role (Story 3.11/3.13): whether this write
+  // genuinely fused the dragged group with another piece/Cluster. `placed`
+  // additionally covers Story 3.19's placement contagion — fusing with an
+  // already-placed piece/Cluster, or a lone corner anchoring at its true
+  // corner, makes the whole merged group placed in the same write.
   | { success: true; version: number; placed?: boolean; fused?: boolean }
   | { success: false; error: { code: ErrorCode } };
 
@@ -67,26 +69,6 @@ function mapUnexpectedError(err: unknown): ErrorCode {
   }
   return ERROR_CODES.UNEXPECTED_ERROR;
 }
-
-// A drop counts as "genuinely touching" a neighbor within this fraction of
-// a tile's own size — a snapping window, not a loose "nearby" radius (Story
-// 3.8's AC: sorting pieces near each other must have zero effect unless
-// they actually touch). Deferred parameter per Architecture's own note
-// ("seuil de proximité... à fixer en implémentation") — tuned during manual
-// verification, not spec-mandated. Widened 0.3 → 0.45 (user feedback,
-// 2026-09-06: the fusion contact window felt too tight) — must exactly
-// mirror `predict-fusion.ts`'s own copy of this constant.
-const CONTACT_TOLERANCE_FACTOR = 0.45;
-
-// How far beyond a target slot's own footprint `placePiece`'s overlap guard
-// widens its unlocked first-pass scan before row-locking whatever it finds
-// there — deliberately more generous than the exact overlap test itself
-// (which uses a plain `tileWidth`/`tileHeight` margin), so a piece that's
-// merely close (not yet exactly overlapping) but could complete its own
-// concurrent move into the slot before this transaction commits still gets
-// locked and re-checked rather than slipping through. Reasonable default,
-// not spec-mandated — tune if manual testing shows it too tight or loose.
-const NEARBY_LOCK_MARGIN_FACTOR = 2;
 
 type GroupMember = {
   pieceId: string;
@@ -186,74 +168,91 @@ async function loadDraggedGroup(
   };
 }
 
-/**
- * Every not-yet-Frame-anchored piece elsewhere in the Room, positioned at
- * its current screen coordinates (free scatter position, or its Cluster's
- * anchor + this piece's offset within it). Frame-anchored pieces are
- * excluded — once locked into the Frame a piece never moves again (no
- * "un-place" mechanic exists), so they can never be a fusion target; the
- * only way to interact with one is the Frame-locking path in `placePiece`.
- */
-function mapFreePieceRows(
+// Every other piece in the Room (loose or already placed into the Frame),
+// positioned at its current screen coordinates — a placed piece's is its
+// fixed Frame-slot center (`frameSlotCenter`), a Cluster member's is its
+// Cluster's anchor + its own offset, everything else is its free scatter
+// position. Unlike the old `loadStationaryFreeCandidates` this deliberately
+// no longer excludes placed pieces: placement now propagates by contagion
+// (Story 3.19), which requires an already-placed piece to be a valid
+// contact/fusion target — a placed piece is never itself *dragged* (that's
+// still guarded separately, by `loadDraggedGroup`'s `ALREADY_PLACED` check),
+// but it must be reachable as a *stationary* candidate for something else to
+// fuse with. Callers that need free-only candidates (the overlap "would
+// this bury a loose piece" guard) filter `placedRow == null` themselves —
+// see `wouldBuryLoosePiece` below.
+type StationaryCandidate = ScreenPositioned & {
+  placedRow: number | null;
+  placedCol: number | null;
+  clusterId: string | null;
+  shapeType: PieceShapeType;
+};
+
+function mapCandidateRows(
   rows: Array<Record<string, unknown>>,
-  tileWidth: number,
-  tileHeight: number,
-): ScreenPositioned[] {
+  geom: FrameGeometry,
+): StationaryCandidate[] {
   return rows.map((row) => {
-    const screenX =
-      row.anchor_x != null
-        ? (row.anchor_x as number) + (row.cluster_offset_col as number) * tileWidth
-        : (row.scatter_x as number);
-    const screenY =
-      row.anchor_y != null
-        ? (row.anchor_y as number) + (row.cluster_offset_row as number) * tileHeight
-        : (row.scatter_y as number);
+    const placedRow = row.placed_row as number | null;
+    const placedCol = row.placed_col as number | null;
+    const { x: screenX, y: screenY } =
+      placedRow != null && placedCol != null
+        ? frameSlotCenter(placedRow, placedCol, geom)
+        : row.anchor_x != null
+          ? {
+              x: (row.anchor_x as number) + (row.cluster_offset_col as number) * geom.tileWidth,
+              y: (row.anchor_y as number) + (row.cluster_offset_row as number) * geom.tileHeight,
+            }
+          : { x: row.scatter_x as number, y: row.scatter_y as number };
     return {
       pieceId: row.id as string,
       gridRow: row.grid_row as number,
       gridCol: row.grid_col as number,
       rotation: row.rotation as number,
+      shapeType: row.shape_type as PieceShapeType,
+      placedRow,
+      placedCol,
+      clusterId: (row.cluster_id as string | null) ?? null,
       screenX,
       screenY,
     };
   });
 }
 
-async function loadStationaryFreeCandidates(
+async function loadStationaryCandidates(
   client: PoolClient,
   roomId: string,
   excludePieceIds: string[],
-  tileWidth: number,
-  tileHeight: number,
-): Promise<ScreenPositioned[]> {
+  geom: FrameGeometry,
+): Promise<StationaryCandidate[]> {
   const result = await client.query(
-    `select p.id, p.grid_row, p.grid_col, p.rotation,
+    `select p.id, p.grid_row, p.grid_col, p.rotation, p.shape_type,
+            p.placed_row, p.placed_col, p.cluster_id,
             p.scatter_x, p.scatter_y, p.cluster_offset_row, p.cluster_offset_col,
             c.anchor_x, c.anchor_y
      from piece p
      left join cluster c on c.id = p.cluster_id
-     where p.room_id = $1 and p.placed_row is null and p.id <> all($2::uuid[])`,
+     where p.room_id = $1 and p.id <> all($2::uuid[])`,
     [roomId, excludePieceIds],
   );
-  return mapFreePieceRows(result.rows, tileWidth, tileHeight);
+  return mapCandidateRows(result.rows, geom);
 }
 
 /**
- * Row-locks and re-reads exactly the given (not-yet-Frame-anchored) pieces
- * — used to close the race window between `placePiece`'s first, unlocked
- * overlap scan and its final write: lock only the handful of pieces that
- * scan already found near the target slots (never every free piece in the
- * Room, which would cost real contention at scale), then re-check their
- * now-guaranteed-fresh position. `FOR UPDATE` on this `LEFT JOIN` also
- * locks each matched piece's Cluster row, if any, blocking a concurrent
- * move of that whole Cluster for the same window.
+ * Row-locks and re-reads exactly the given pieces — used to close the race
+ * window between the first, unlocked scan (contact detection, or the
+ * overlap guard's own nearby-candidate scan) and the final write: lock only
+ * the handful of pieces that scan already found relevant (never every piece
+ * in the Room, which would cost real contention at scale), then re-check
+ * their now-guaranteed-fresh position/placement state. `FOR UPDATE` on this
+ * `LEFT JOIN` also locks each matched piece's Cluster row, if any, blocking
+ * a concurrent move of that whole Cluster for the same window.
  */
-async function loadAndLockFreePiecesByIds(
+async function loadAndLockPiecesByIds(
   client: PoolClient,
   pieceIds: string[],
-  tileWidth: number,
-  tileHeight: number,
-): Promise<ScreenPositioned[]> {
+  geom: FrameGeometry,
+): Promise<StationaryCandidate[]> {
   if (pieceIds.length === 0) {
     return [];
   }
@@ -265,12 +264,13 @@ async function loadAndLockFreePiecesByIds(
   // query instead — still within the same transaction, still closing the
   // same race this function exists for.
   const result = await client.query(
-    `select p.id, p.grid_row, p.grid_col, p.rotation, p.cluster_id,
+    `select p.id, p.grid_row, p.grid_col, p.rotation, p.shape_type, p.cluster_id,
+            p.placed_row, p.placed_col,
             p.scatter_x, p.scatter_y, p.cluster_offset_row, p.cluster_offset_col,
             c.anchor_x, c.anchor_y
      from piece p
      left join cluster c on c.id = p.cluster_id
-     where p.id = any($1::uuid[]) and p.placed_row is null
+     where p.id = any($1::uuid[])
      for update of p`,
     [pieceIds],
   );
@@ -280,7 +280,7 @@ async function loadAndLockFreePiecesByIds(
       clusterIds,
     ]);
   }
-  return mapFreePieceRows(result.rows, tileWidth, tileHeight);
+  return mapCandidateRows(result.rows, geom);
 }
 
 async function loadTrueNeighborSets(
@@ -332,24 +332,143 @@ async function repositionPlain(
   return versionResult.rows[0].version;
 }
 
+type MergedMember = {
+  pieceId: string;
+  gridRow: number;
+  gridCol: number;
+  rotation: number;
+  shapeType: PieceShapeType;
+  placedRow: number | null;
+  placedCol: number | null;
+  screenX: number;
+  screenY: number;
+};
+
+// How far beyond a target slot's own footprint the overlap guard widens its
+// unlocked first-pass scan before row-locking whatever it finds there —
+// deliberately more generous than the exact overlap test itself (which uses
+// a plain `tileWidth`/`tileHeight` margin), so a piece that's merely close
+// (not yet exactly overlapping) but could complete its own concurrent move
+// into a target slot before this transaction commits still gets locked and
+// re-checked rather than slipping through. Reasonable default, not
+// spec-mandated — tune if manual testing shows it too tight or loose.
+const NEARBY_LOCK_MARGIN_FACTOR = 2;
+
 /**
- * The one place that ever fuses pieces/Clusters together (Story 3.8),
- * reused by every drag-end path — `movePiece` (a free-space drop) and
- * `placePiece`'s fallback (a drop near the Frame that didn't lock in).
- * Checks whether the dragged group has been genuinely brought into contact
- * with another not-yet-Frame-anchored piece/Cluster anywhere in the Room
- * (in the Frame's visual area or not — Story 8's AC #1 doesn't distinguish)
- * and fuses on a genuine match. A false or absent contact is never
- * rejected — it's simply a plain reposition instead, same principle as
- * `placePiece`: only ever confirm a *positive* match, never bounce a drop
- * back for failing one.
+ * Whether locking every member in `targets` into its slot would bury a
+ * still-loose piece resting nearby — a locked piece never moves again, so
+ * one buried at lock time would become permanently unreachable. Two passes
+ * (unlocked scan, then row-lock-and-recheck just the candidates that scan
+ * found) to close the same race window `repositionFuseOrPlace`'s own
+ * contact re-check closes, without locking every free piece in the Room.
+ * `excludePieceIds` must be every id in the merged group being placed — a
+ * piece that's itself about to join the group must never trip this guard
+ * against its own future slot.
  */
-async function repositionOrFuse(
+async function wouldBuryLoosePiece(
+  client: PoolClient,
+  roomId: string,
+  geom: FrameGeometry,
+  targets: ReadonlyMap<string, { row: number; col: number }>,
+  excludePieceIds: readonly string[],
+): Promise<boolean> {
+  const slotCenters = [...targets.values()].map((t) => frameSlotCenter(t.row, t.col, geom));
+  const initialFreeCandidates = (
+    await loadStationaryCandidates(client, roomId, [...excludePieceIds], geom)
+  ).filter((p) => p.placedRow == null);
+  const nearbyPieceIds = initialFreeCandidates
+    .filter((p) =>
+      slotCenters.some(
+        (slot) =>
+          Math.abs(p.screenX - slot.x) < geom.tileWidth * NEARBY_LOCK_MARGIN_FACTOR &&
+          Math.abs(p.screenY - slot.y) < geom.tileHeight * NEARBY_LOCK_MARGIN_FACTOR,
+      ),
+    )
+    .map((p) => p.pieceId);
+  const lockedFreeCandidates = (await loadAndLockPiecesByIds(client, nearbyPieceIds, geom))
+    .filter((p) => p.placedRow == null)
+    .map((p) => ({ x: p.screenX, y: p.screenY }));
+  return slotCenters.some((slotCenter) =>
+    overlapsAnyFreePiece(slotCenter, lockedFreeCandidates, geom.tileWidth, geom.tileHeight),
+  );
+}
+
+/**
+ * Writes every non-anchor member's `placed_row`/`placed_col` (an anchor is
+ * a member whose current `placedRow`/`placedCol` already equals its own
+ * computed target — either a genuinely-already-placed contagion anchor, or,
+ * trivially, a corner member anchoring at rowDelta/colDelta (0,0)), clears
+ * `cluster_id` on every member, and deletes every Cluster row the merged
+ * group touched — the same atomic "every member individually placed, no
+ * Cluster survives" invariant `placePiece` used to enforce alone.
+ */
+async function writeContagionPlacement(
+  client: PoolClient,
+  targets: ReadonlyMap<string, { row: number; col: number }>,
+  mergedMembers: readonly MergedMember[],
+  clusterIdsToDelete: ReadonlySet<string>,
+  draggedPieceId: string,
+): Promise<number> {
+  for (const member of mergedMembers) {
+    const target = targets.get(member.pieceId)!;
+    if (member.placedRow === target.row && member.placedCol === target.col) {
+      continue;
+    }
+    await client.query(
+      `update piece
+       set placed_row = $2, placed_col = $3, cluster_id = null,
+           cluster_offset_row = null, cluster_offset_col = null, version = version + 1
+       where id = $1`,
+      [member.pieceId, target.row, target.col],
+    );
+  }
+  if (clusterIdsToDelete.size > 0) {
+    await client.query(`delete from cluster where id = any($1::uuid[])`, [
+      [...clusterIdsToDelete],
+    ]);
+  }
+  const versionResult = await client.query(`select version from piece where id = $1`, [
+    draggedPieceId,
+  ]);
+  return versionResult.rows[0].version;
+}
+
+/**
+ * The one place that ever fuses, or places, pieces/Clusters together —
+ * reused by every drag-end, everywhere (Frame or free space alike; the
+ * mechanics no longer differ). Checks whether the dragged group has been
+ * genuinely brought into contact with another piece/Cluster anywhere in the
+ * Room (Story 3.8's true-neighbor + rotation check, unchanged) and, if so:
+ *
+ * - if the merged group (dragged + touched) contains an already-placed
+ *   member, the whole group inherits placement from it (contagion, Story
+ *   3.19) — every member's target slot is its own true grid position offset
+ *   by that anchor's own placed-vs-grid delta;
+ * - otherwise, if no member is already placed but one is a corner piece
+ *   resting at its own true corner, that's the sole remaining bootstrap
+ *   anchor (`findCornerAnchor` — stricter than the old shape-only bootstrap:
+ *   it must be *the* true corner, not merely *a* corner slot);
+ * - otherwise it's a plain fusion — the merged group becomes (or joins) a
+ *   free-floating Cluster, exactly as before.
+ *
+ * A false or absent contact, or a contagion/corner attempt that doesn't
+ * validate, is never rejected outright — it just rests at the raw drop
+ * point (optionally still genuinely fused), same principle as before: only
+ * ever confirm a *positive* match, never bounce a drop back for failing
+ * one.
+ */
+async function repositionFuseOrPlace(
   client: PoolClient,
   group: DraggedGroup,
   x: number,
   y: number,
-): Promise<{ version: number; fused: boolean }> {
+): Promise<{ version: number; fused: boolean; placed: boolean }> {
+  const geom: FrameGeometry = {
+    gridRows: group.gridRows,
+    gridCols: group.gridCols,
+    tileWidth: group.tileWidth,
+    tileHeight: group.tileHeight,
+  };
   const newAnchorX = x - group.draggedMember.offsetCol * group.tileWidth;
   const newAnchorY = y - group.draggedMember.offsetRow * group.tileHeight;
   const draggedScreenMembers: ScreenPositioned[] = group.members.map((m) => ({
@@ -360,13 +479,27 @@ async function repositionOrFuse(
     screenX: newAnchorX + m.offsetCol * group.tileWidth,
     screenY: newAnchorY + m.offsetRow * group.tileHeight,
   }));
+  const draggedScreenById = new Map(draggedScreenMembers.map((m) => [m.pieceId, m]));
+  const draggedMergedMembers: MergedMember[] = group.members.map((m) => {
+    const screen = draggedScreenById.get(m.pieceId)!;
+    return {
+      pieceId: m.pieceId,
+      gridRow: m.gridRow,
+      gridCol: m.gridCol,
+      rotation: m.rotation,
+      shapeType: m.shapeType,
+      placedRow: null,
+      placedCol: null,
+      screenX: screen.screenX,
+      screenY: screen.screenY,
+    };
+  });
 
-  const stationary = await loadStationaryFreeCandidates(
+  const stationary = await loadStationaryCandidates(
     client,
     group.roomId,
     group.members.map((m) => m.pieceId),
-    group.tileWidth,
-    group.tileHeight,
+    geom,
   );
   const tolerance = Math.min(group.tileWidth, group.tileHeight) * CONTACT_TOLERANCE_FACTOR;
   const candidates = findContactCandidates(
@@ -377,65 +510,211 @@ async function repositionOrFuse(
     tolerance,
   );
 
-  if (candidates.length === 0) {
-    return { version: await repositionPlain(client, group, x, y), fused: false };
-  }
-
-  const trueNeighborsByPieceId = await loadTrueNeighborSets(
-    client,
-    group.members.map((m) => m.pieceId),
-  );
-  const genuine = validateFusion(candidates, trueNeighborsByPieceId);
-  if (!genuine) {
-    return { version: await repositionPlain(client, group, x, y), fused: false };
-  }
-
-  // Fuse: gather every distinct touched group's full membership, not just
-  // the one contacting piece — an entire touched Cluster comes along.
+  let mergedMembers: MergedMember[] = draggedMergedMembers;
+  let genuinelyFused = false;
   const touchedClusterIds = new Set<string>();
   const touchedSoloPieceIds = new Set<string>();
-  const stationaryRowsById = new Map(stationary.map((s) => [s.pieceId, s]));
-  const touchedResult = await client.query(
-    `select id, cluster_id from piece where id = any($1::uuid[]) for update`,
-    [candidates.map((c) => c.b.pieceId)],
-  );
 
-  // Re-verify contact with the now-locked, guaranteed-fresh position —
-  // `candidates` above came from an unlocked read, so a concurrent
-  // `movePiece` could have relocated a touched piece in the window between
-  // that read and this lock. Fusing on the stale geometry anyway would
-  // silently override whatever the other Participant just did. Same
-  // "scan unlocked, then lock-and-recheck" shape as `placePiece`'s overlap
-  // guard.
-  const freshTouched = await loadAndLockFreePiecesByIds(
-    client,
-    candidates.map((c) => c.b.pieceId),
-    group.tileWidth,
-    group.tileHeight,
-  );
-  const freshCandidates = findContactCandidates(
-    draggedScreenMembers,
-    freshTouched,
-    group.tileWidth,
-    group.tileHeight,
-    tolerance,
-  );
-  if (freshCandidates.length === 0) {
-    return { version: await repositionPlain(client, group, x, y), fused: false };
-  }
-  const stillGenuine = validateFusion(freshCandidates, trueNeighborsByPieceId);
-  if (!stillGenuine) {
-    return { version: await repositionPlain(client, group, x, y), fused: false };
-  }
-
-  for (const row of touchedResult.rows) {
-    if (row.cluster_id) {
-      touchedClusterIds.add(row.cluster_id);
-    } else {
-      touchedSoloPieceIds.add(row.id);
+  if (candidates.length > 0) {
+    const trueNeighborsByPieceId = await loadTrueNeighborSets(
+      client,
+      group.members.map((m) => m.pieceId),
+    );
+    const genuine = validateFusion(candidates, trueNeighborsByPieceId);
+    if (genuine) {
+      // Re-verify contact with the now-locked, guaranteed-fresh position —
+      // `candidates` above came from an unlocked read, so a concurrent
+      // write could have relocated a touched piece in the window between
+      // that read and this lock. Fusing on the stale geometry anyway would
+      // silently override whatever the other Participant just did.
+      const touchedResult = await client.query(
+        `select id, cluster_id, grid_row, grid_col, rotation, shape_type, placed_row, placed_col
+         from piece where id = any($1::uuid[]) for update`,
+        [candidates.map((c) => c.b.pieceId)],
+      );
+      const freshTouched = await loadAndLockPiecesByIds(
+        client,
+        candidates.map((c) => c.b.pieceId),
+        geom,
+      );
+      const freshCandidates = findContactCandidates(
+        draggedScreenMembers,
+        freshTouched,
+        group.tileWidth,
+        group.tileHeight,
+        tolerance,
+      );
+      const stillGenuine =
+        freshCandidates.length > 0 && validateFusion(freshCandidates, trueNeighborsByPieceId);
+      if (stillGenuine) {
+        genuinelyFused = true;
+        const freshTouchedById = new Map(freshTouched.map((s) => [s.pieceId, s]));
+        const extraMembers: MergedMember[] = [];
+        for (const row of touchedResult.rows) {
+          if (row.cluster_id) {
+            touchedClusterIds.add(row.cluster_id);
+          } else {
+            touchedSoloPieceIds.add(row.id);
+            const screen = freshTouchedById.get(row.id)!;
+            extraMembers.push({
+              pieceId: row.id,
+              gridRow: row.grid_row,
+              gridCol: row.grid_col,
+              rotation: row.rotation,
+              shapeType: row.shape_type,
+              placedRow: row.placed_row,
+              placedCol: row.placed_col,
+              screenX: screen.screenX,
+              screenY: screen.screenY,
+            });
+          }
+        }
+        for (const otherClusterId of touchedClusterIds) {
+          const membersResult = await client.query(
+            `select p.id, p.grid_row, p.grid_col, p.rotation, p.shape_type,
+                    p.cluster_offset_row, p.cluster_offset_col, c.anchor_x, c.anchor_y
+             from piece p
+             join cluster c on c.id = p.cluster_id
+             where p.cluster_id = $1
+             for update`,
+            [otherClusterId],
+          );
+          for (const m of membersResult.rows) {
+            extraMembers.push({
+              pieceId: m.id,
+              gridRow: m.grid_row,
+              gridCol: m.grid_col,
+              rotation: m.rotation,
+              shapeType: m.shape_type,
+              placedRow: null,
+              placedCol: null,
+              screenX: m.anchor_x + m.cluster_offset_col * group.tileWidth,
+              screenY: m.anchor_y + m.cluster_offset_row * group.tileHeight,
+            });
+          }
+        }
+        mergedMembers = [...draggedMergedMembers, ...extraMembers];
+      }
     }
   }
 
+  const mergedPieceIds = mergedMembers.map((m) => m.pieceId);
+  const clustersInMergedGroup = new Set(
+    [...touchedClusterIds, ...(group.clusterId ? [group.clusterId] : [])],
+  );
+
+  const anchorResolution = resolvePlacementAnchor(
+    mergedMembers.map(
+      (m): ContagionMember => ({
+        pieceId: m.pieceId,
+        gridRow: m.gridRow,
+        gridCol: m.gridCol,
+        rotation: m.rotation,
+        placedRow: m.placedRow,
+        placedCol: m.placedCol,
+      }),
+    ),
+  );
+
+  // A genuinely-already-placed anchor is un-clusterable (there's no modeled
+  // "partially placed" state) — any failure here means the geometry
+  // contradicted itself (two mutually-inconsistent already-placed regions
+  // touching, or a write that can't land), so the only safe outcome is to
+  // abort the whole drop, never a partial/downgraded fusion.
+  if (anchorResolution.kind === "conflict") {
+    return { version: await repositionPlain(client, group, x, y), fused: false, placed: false };
+  }
+  if (anchorResolution.kind === "anchored") {
+    const targetsResult = computeContagionTargets(anchorResolution.anchor, mergedMembers, geom);
+    if (targetsResult.valid) {
+      const nonAnchorTargets = [...targetsResult.targets].filter(
+        ([, target]) =>
+          !mergedMembers.some(
+            (m) =>
+              m.placedRow === target.row && m.placedCol === target.col && m.placedRow != null,
+          ),
+      );
+      const slotResult =
+        nonAnchorTargets.length === 0
+          ? { rows: [] }
+          : await client.query(
+              `select 1 from piece
+               where room_id = $1 and (placed_row, placed_col) in (
+                 select * from unnest($2::int[], $3::int[])
+               ) and id <> all($4::uuid[])`,
+              [
+                group.roomId,
+                nonAnchorTargets.map(([, t]) => t.row),
+                nonAnchorTargets.map(([, t]) => t.col),
+                mergedPieceIds,
+              ],
+            );
+      const buried =
+        slotResult.rows.length === 0 &&
+        (await wouldBuryLoosePiece(client, group.roomId, geom, targetsResult.targets, mergedPieceIds));
+      if (slotResult.rows.length === 0 && !buried) {
+        const version = await writeContagionPlacement(
+          client,
+          targetsResult.targets,
+          mergedMembers,
+          clustersInMergedGroup,
+          group.draggedMember.pieceId,
+        );
+        return { version, fused: genuinelyFused, placed: true };
+      }
+    }
+    // Contagion didn't validate — abort entirely, per the rule above.
+    return { version: await repositionPlain(client, group, x, y), fused: false, placed: false };
+  }
+
+  // No already-placed anchor in the merged group — the only remaining way
+  // to place is a lone corner (or an Îlot containing one) resting at its
+  // own true corner slot. A failure here (occupied/overlap/out-of-bounds)
+  // falls back to the plain-fusion outcome below, unlike a contagion
+  // failure — a corner "anchor" was never a real DB commitment, so the
+  // fusion match itself (if genuine) is still worth keeping.
+  const cornerAnchor = findCornerAnchor(
+    mergedMembers as unknown as AnchorCandidateMember[],
+    geom,
+  );
+  if (cornerAnchor) {
+    const targetsResult = computeContagionTargets({ rowDelta: 0, colDelta: 0 }, mergedMembers, geom);
+    if (targetsResult.valid) {
+      const slotResult = await client.query(
+        `select 1 from piece
+         where room_id = $1 and (placed_row, placed_col) in (
+           select * from unnest($2::int[], $3::int[])
+         ) and id <> all($4::uuid[])`,
+        [
+          group.roomId,
+          [...targetsResult.targets.values()].map((t) => t.row),
+          [...targetsResult.targets.values()].map((t) => t.col),
+          mergedPieceIds,
+        ],
+      );
+      const buried =
+        slotResult.rows.length === 0 &&
+        (await wouldBuryLoosePiece(client, group.roomId, geom, targetsResult.targets, mergedPieceIds));
+      if (slotResult.rows.length === 0 && !buried) {
+        const version = await writeContagionPlacement(
+          client,
+          targetsResult.targets,
+          mergedMembers,
+          clustersInMergedGroup,
+          group.draggedMember.pieceId,
+        );
+        return { version, fused: genuinelyFused, placed: true };
+      }
+    }
+  }
+
+  if (!genuinelyFused) {
+    return { version: await repositionPlain(client, group, x, y), fused: false, placed: false };
+  }
+
+  // Plain fusion: merge into a free-floating Cluster, exactly as before —
+  // no member is placed.
+  const stationaryRowsById = new Map(stationary.map((s) => [s.pieceId, s]));
   const allMembers = new Map<string, { gridRow: number; gridCol: number }>();
   for (const m of group.members) {
     allMembers.set(m.pieceId, { gridRow: m.gridRow, gridCol: m.gridCol });
@@ -462,11 +741,12 @@ async function repositionOrFuse(
   const survivingClusterId =
     group.clusterId ??
     [...touchedClusterIds][0] ??
-    (await client.query(`insert into cluster (room_id, anchor_x, anchor_y) values ($1, $2, $3) returning id`, [
-      group.roomId,
-      mergedAnchorX,
-      mergedAnchorY,
-    ])).rows[0].id;
+    (
+      await client.query(
+        `insert into cluster (room_id, anchor_x, anchor_y) values ($1, $2, $3) returning id`,
+        [group.roomId, mergedAnchorX, mergedAnchorY],
+      )
+    ).rows[0].id;
 
   if (group.clusterId || touchedClusterIds.has(survivingClusterId)) {
     await client.query(
@@ -482,15 +762,6 @@ async function repositionOrFuse(
   for (const [pieceId, pos] of allMembers) {
     const offsetRow = pos.gridRow - minGridRow;
     const offsetCol = pos.gridCol - minGridCol;
-    // `scatter_x`/`scatter_y` are left as-is (stale, unused while
-    // `cluster_id` is set — the column is `not null`, so there's nothing
-    // meaningful to reset them to; rendering always prefers
-    // `cluster_id`/offset over scatter position, see `pieceRenderPosition`).
-    // `version` bumps here for *every* member, not just the dragged piece
-    // (AD-6) — a joined member's cluster membership just changed just as
-    // much as its position did, so a stale client-cached version for it
-    // must stop matching too, or a future `expectedVersion` check against
-    // that piece would wrongly pass despite this write.
     await client.query(
       `update piece
        set cluster_id = $2, cluster_offset_row = $3, cluster_offset_col = $4, version = version + 1
@@ -506,14 +777,17 @@ async function repositionOrFuse(
   const versionResult = await client.query(`select version from piece where id = $1`, [
     group.draggedMember.pieceId,
   ]);
-  return { version: versionResult.rows[0].version, fused: true };
+  return { version: versionResult.rows[0].version, fused: true, placed: false };
 }
 
 /**
- * Repositions an unplaced piece/Cluster in free space, checking along the
- * way whether it's been genuinely brought into contact with another
- * piece/Cluster (Story 3.8) — never a per-frame check, only at drag-end,
- * same performance reasoning as Story 3.3.
+ * Repositions an unplaced piece/Cluster — checking along the way whether
+ * it's been genuinely brought into contact with another piece/Cluster
+ * (Story 3.8) and, since Story 3.19, whether that contact (or a lone
+ * corner's own true position) makes the whole merged group placed. The
+ * single drag-end Server Action now, everywhere — Frame or free space alike
+ * (`placePiece` is gone; the mechanics no longer differ). Never a per-frame
+ * check, only at drag-end, same performance reasoning as Story 3.3.
  */
 export async function movePiece(input: {
   pieceId: string;
@@ -539,9 +813,14 @@ export async function movePiece(input: {
       return { success: false, error: { code: ERROR_CODES.ALREADY_PLACED } };
     }
 
-    const { version, fused } = await repositionOrFuse(client, loaded.group, input.x, input.y);
+    const { version, fused, placed } = await repositionFuseOrPlace(
+      client,
+      loaded.group,
+      input.x,
+      input.y,
+    );
     await client.query("COMMIT");
-    return { success: true, version, fused };
+    return { success: true, version, fused, placed };
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("movePiece failed:", err);
@@ -611,284 +890,3 @@ export async function rotatePiece(input: {
   }
 }
 
-/**
- * Attempts to lock a piece/Cluster into the Frame at (targetRow, targetCol)
- * — `targetRow`/`targetCol` are where `pieceId` specifically (not
- * necessarily the group's own offset-(0,0) member) would land, and `x`/`y`
- * is the raw drop point (used only as the fallback position if locking
- * doesn't validate). Validates shape + orientation for *every* member
- * (never position/identity — FR-6) and, for any already-Frame-placed
- * orthogonal neighbor of any member, that it's a true neighbor per the
- * precomputed `PieceAdjacency` graph (AD-3) — zero tolerance, one bad
- * member falls the whole group back to `repositionOrFuse` at the raw drop
- * point instead of locking in (so a drop near the Frame that doesn't
- * validate still gets a chance to fuse with another loose piece/Cluster
- * resting nearby — this rule doesn't stop applying just because the drop
- * happened to land close to a Frame slot). On success every member becomes
- * an individually `placed_row`/`placed_col` Piece (the Frame has no notion
- * of Clusters) and the Cluster row, if any, is dropped. A single atomic
- * transaction — no partial state is ever observable.
- */
-export async function placePiece(input: {
-  pieceId: string;
-  targetRow: number;
-  targetCol: number;
-  x: number;
-  y: number;
-  expectedVersion: number;
-}): Promise<PieceActionResult> {
-  const client = await pgPool.connect();
-  try {
-    await client.query("BEGIN");
-
-    const loaded = await loadDraggedGroup(client, input.pieceId);
-    if (!loaded.ok) {
-      await client.query("ROLLBACK");
-      return { success: false, error: { code: loaded.code } };
-    }
-    if (loaded.version !== input.expectedVersion) {
-      await client.query("ROLLBACK");
-      return { success: false, error: { code: ERROR_CODES.STALE_WRITE } };
-    }
-    if (loaded.placedRow !== null) {
-      await client.query("ROLLBACK");
-      return { success: false, error: { code: ERROR_CODES.ALREADY_PLACED } };
-    }
-
-    const { group } = loaded;
-
-    async function restWithoutLocking(): Promise<PieceActionResult> {
-      const { version, fused } = await repositionOrFuse(client, group, input.x, input.y);
-      await client.query("COMMIT");
-      // Story 3.11: `placed: false` on every path through here — this
-      // write succeeded (the piece/Cluster rests somewhere valid, possibly
-      // fused), it just never actually locked into the Frame. The client
-      // uses this to tell an *ordinary, expected* non-lock (it predicted
-      // the same outcome) from a *genuine, rare* disagreement (it predicted
-      // a lock and got this instead) — see `collections.ts`'s `onUpdate`.
-      // `fused` (Story 3.13) is the analogous signal for the optimistic-
-      // fusion prediction — a Frame-slot drop that didn't lock can still
-      // genuinely fuse with a neighbor instead of just resting loose.
-      return { success: true, version, placed: false, fused };
-    }
-
-    const anchorTargetRow = input.targetRow - group.draggedMember.offsetRow;
-    const anchorTargetCol = input.targetCol - group.draggedMember.offsetCol;
-    const targets = group.members.map((m) => ({
-      member: m,
-      targetRow: anchorTargetRow + m.offsetRow,
-      targetCol: anchorTargetCol + m.offsetCol,
-    }));
-
-    for (const t of targets) {
-      const inBounds =
-        Number.isInteger(t.targetRow) &&
-        Number.isInteger(t.targetCol) &&
-        t.targetRow >= 0 &&
-        t.targetRow < group.gridRows &&
-        t.targetCol >= 0 &&
-        t.targetCol < group.gridCols;
-      if (!inBounds) {
-        return restWithoutLocking();
-      }
-    }
-
-    const slotRowsParam = targets.map((t) => t.targetRow);
-    const slotColsParam = targets.map((t) => t.targetCol);
-    const slotResult = await client.query(
-      `select 1 from piece
-       where room_id = $1 and (placed_row, placed_col) in (
-         select * from unnest($2::int[], $3::int[])
-       )`,
-      [group.roomId, slotRowsParam, slotColsParam],
-    );
-    if (slotResult.rows.length > 0) {
-      return restWithoutLocking();
-    }
-
-    // A locked piece never moves again — one left overlapping a loose piece
-    // still resting nearby (Story 3.5's "a failed lock just rests where
-    // dropped", possible since that change) would bury it permanently, with
-    // no way to ever reach it again. Checked against every not-yet-Frame-
-    // anchored piece's *actual* current position (never grid-aligned, so
-    // the exact-slot `SLOT_OCCUPIED` check above can't catch this).
-    //
-    // Two passes, not one: the first (unlocked) scan of every free piece in
-    // the Room would otherwise leave a race — a concurrent `movePiece`
-    // could land a loose piece on this exact spot between that read and
-    // this transaction's commit, burying it anyway with nothing catching
-    // it (unlike the exact-slot check above, which the `piece_room_placed_
-    // slot_key` unique index backstops). Locking every free piece in the
-    // Room up front to close that window would cost real contention at
-    // scale (Story 3.10's concurrent-Participants scenario), so only the
-    // handful the first pass actually finds nearby get row-locked and
-    // re-checked with a guaranteed-fresh position — narrows the window to
-    // "an unrelated piece gets dragged into this exact spot in the instant
-    // between the two passes," not "any write anywhere in the Room."
-    const frameWidth = group.gridCols * group.tileWidth;
-    const frameHeight = group.gridRows * group.tileHeight;
-    const slotCenters = targets.map((t) => ({
-      x: -frameWidth / 2 + t.targetCol * group.tileWidth + group.tileWidth / 2,
-      y: -frameHeight / 2 + t.targetRow * group.tileHeight + group.tileHeight / 2,
-    }));
-
-    const initialFreeCandidates = await loadStationaryFreeCandidates(
-      client,
-      group.roomId,
-      group.members.map((m) => m.pieceId),
-      group.tileWidth,
-      group.tileHeight,
-    );
-    const nearbyPieceIds = initialFreeCandidates
-      .filter((p) =>
-        slotCenters.some(
-          (slot) =>
-            Math.abs(p.screenX - slot.x) < group.tileWidth * NEARBY_LOCK_MARGIN_FACTOR &&
-            Math.abs(p.screenY - slot.y) < group.tileHeight * NEARBY_LOCK_MARGIN_FACTOR,
-        ),
-      )
-      .map((p) => p.pieceId);
-    const lockedFreeCandidates = (
-      await loadAndLockFreePiecesByIds(
-        client,
-        nearbyPieceIds,
-        group.tileWidth,
-        group.tileHeight,
-      )
-    ).map((p) => ({ x: p.screenX, y: p.screenY }));
-    for (const slotCenter of slotCenters) {
-      if (
-        overlapsAnyFreePiece(slotCenter, lockedFreeCandidates, group.tileWidth, group.tileHeight)
-      ) {
-        return restWithoutLocking();
-      }
-    }
-
-    for (const t of targets) {
-      const orientationResult = validatePieceOrientationAndShape(
-        t.member.shapeType,
-        t.member.rotation,
-        t.targetRow,
-        t.targetCol,
-        group.gridRows,
-        group.gridCols,
-      );
-      if (!orientationResult.valid) {
-        return restWithoutLocking();
-      }
-    }
-
-    // Joined against the neighbor's own true grid position — `piece_adjacency`
-    // itself is undirected ("these two are really neighbors somewhere"), so
-    // without also knowing *which side* each true neighbor sits on relative
-    // to this member's own true grid position, a piece's true left-neighbor
-    // could be accepted sitting to its right (both are still members of its
-    // true-neighbor set) — reported directly from manual testing.
-    const neighborIdsResult = await client.query(
-      `select pa.piece_id, pa.neighbor_piece_id, p.grid_row as neighbor_grid_row, p.grid_col as neighbor_grid_col
-       from piece_adjacency pa
-       join piece p on p.id = pa.neighbor_piece_id
-       where pa.piece_id = any($1::uuid[])`,
-      [targets.map((t) => t.member.pieceId)],
-    );
-    const memberByPieceId = new Map(group.members.map((m) => [m.pieceId, m]));
-    const trueNeighborsByPieceIdAndDirection = new Map<
-      string,
-      Partial<Record<OrthogonalDirection, string>>
-    >();
-    for (const row of neighborIdsResult.rows) {
-      const member = memberByPieceId.get(row.piece_id);
-      if (!member) {
-        continue;
-      }
-      const deltaRow = row.neighbor_grid_row - member.gridRow;
-      const deltaCol = row.neighbor_grid_col - member.gridCol;
-      const direction = directionFromDelta(deltaRow, deltaCol);
-      if (!direction) {
-        continue;
-      }
-      const byDirection = trueNeighborsByPieceIdAndDirection.get(row.piece_id) ?? {};
-      byDirection[direction] = row.neighbor_piece_id;
-      trueNeighborsByPieceIdAndDirection.set(row.piece_id, byDirection);
-    }
-
-    const allAdjacentSlots = targets.flatMap((t) => [
-      [t.targetRow - 1, t.targetCol],
-      [t.targetRow + 1, t.targetCol],
-      [t.targetRow, t.targetCol - 1],
-      [t.targetRow, t.targetCol + 1],
-    ]);
-    const occupiedNeighborsResult = await client.query(
-      `select id, placed_row, placed_col from piece
-       where room_id = $1 and placed_row is not null
-         and (placed_row, placed_col) in (
-           select * from unnest($2::int[], $3::int[])
-         )`,
-      [group.roomId, allAdjacentSlots.map(([row]) => row), allAdjacentSlots.map(([, col]) => col)],
-    );
-    const occupiedByCoord = new Map<string, string>(
-      occupiedNeighborsResult.rows.map((row) => [`${row.placed_row},${row.placed_col}`, row.id]),
-    );
-
-    // Bootstrap leniency (no already-validated neighbor to test against) is
-    // reserved for a genuine corner — one of exactly four unambiguous
-    // anchors in the whole Frame. Every other piece/Cluster, however
-    // internally consistent it already is, must land touching a piece
-    // that's already validated (i.e. already locked into the Frame) —
-    // otherwise nothing here has actually been confirmed correct yet, and
-    // it just rests unplaced instead of being rejected.
-    //
-    // `canBootstrapWithoutNeighbor` trusts that every member's shape/target
-    // slot was already confirmed by the `validatePieceOrientationAndShape`
-    // loop just above this one — that ordering (orientation, then
-    // bootstrap) is what makes a `true` result here mean a genuine corner
-    // slot, not just a piece whose `shapeType` happens to say `"corner"`.
-    // Don't reorder these two loops without re-checking that contract (see
-    // the longer comment on `canBootstrapWithoutNeighbor` itself).
-    if (occupiedByCoord.size === 0) {
-      if (!canBootstrapWithoutNeighbor(group.members.map((m) => m.shapeType))) {
-        return restWithoutLocking();
-      }
-    } else {
-      for (const t of targets) {
-        const trueNeighborsByDirection =
-          trueNeighborsByPieceIdAndDirection.get(t.member.pieceId) ?? {};
-        const neighborResult = validatePlacementNeighbors(
-          trueNeighborsByDirection,
-          occupiedByCoord,
-          t.targetRow,
-          t.targetCol,
-        );
-        if (!neighborResult.valid) {
-          return restWithoutLocking();
-        }
-      }
-    }
-
-    for (const t of targets) {
-      await client.query(
-        `update piece
-         set placed_row = $2, placed_col = $3, cluster_id = null,
-             cluster_offset_row = null, cluster_offset_col = null, version = version + 1
-         where id = $1`,
-        [t.member.pieceId, t.targetRow, t.targetCol],
-      );
-    }
-    if (group.clusterId) {
-      await client.query(`delete from cluster where id = $1`, [group.clusterId]);
-    }
-
-    const versionResult = await client.query(`select version from piece where id = $1`, [
-      input.pieceId,
-    ]);
-
-    await client.query("COMMIT");
-    return { success: true, version: versionResult.rows[0].version, placed: true };
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("placePiece failed:", err);
-    return { success: false, error: { code: mapUnexpectedError(err) } };
-  } finally {
-    client.release();
-  }
-}

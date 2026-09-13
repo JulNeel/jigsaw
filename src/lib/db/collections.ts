@@ -18,7 +18,7 @@
 
 import { createCollection } from "@tanstack/db";
 import { createClient } from "@/lib/auth/supabase-browser";
-import { movePiece, placePiece, rotatePiece } from "@/lib/rooms/piece-actions";
+import { movePiece, rotatePiece } from "@/lib/rooms/piece-actions";
 import {
   consumeAndCheckPredictedLock,
   emitPlacementConflict,
@@ -322,20 +322,16 @@ export function createRoomCollections({
       // wrong guess.
       const speculativeVersion = expectedVersion + 1;
       ownLastKnownVersionByPieceId.set(pieceId, speculativeVersion);
+      // Story 3.19's unified mechanic: `placePiece` is gone — `movePiece`
+      // is the single drag-end Server Action now, everywhere (Frame or
+      // free space alike). This must never depend on the client's own
+      // prediction (AD-2, unchanged) — an optimistic placement guess sets
+      // `placedRow` alongside `scatterX`/`scatterY` (see `predict-drop.ts`'s
+      // caller in `room-canvas.tsx`), but the Server Action call itself is
+      // exactly the same either way, so a false-negative prediction can
+      // never silently block a genuinely valid placement.
       let result;
-      if (changes.placedRow != null) {
-        result = await placePiece({
-          pieceId,
-          targetRow: changes.placedRow,
-          targetCol: mutation.modified.placedCol!,
-          // The raw drop point — used only as the fallback resting position
-          // if locking into the Frame doesn't validate (never rejected
-          // outright, see `placePiece`'s Dev Notes).
-          x: mutation.modified.scatterX,
-          y: mutation.modified.scatterY,
-          expectedVersion,
-        });
-      } else if (changes.rotation !== undefined) {
+      if (changes.rotation !== undefined) {
         // No `expectedVersion` here — `rotatePiece` is a commutative,
         // order-independent `+90°` server-side increment specifically so
         // that two rotations racing (a fast double-click before the first's
@@ -368,11 +364,7 @@ export function createRoomCollections({
         // representative member) to stop trusting their guess immediately —
         // see `move-conflict-events.ts`'s own comment for why this explicit
         // signal replaced an earlier data-comparison guess. Fires on *any*
-        // rejected write (move or place alike, Story 3.19) — a rejected
-        // Cluster Frame-lock attempt (`placePiece`) needs this signal just
-        // as much as a rejected plain reposition (`movePiece`) always did;
-        // gating it to moves only left `optimisticAnchor` itself with a
-        // latent gap for the Frame-lock case specifically.
+        // rejected write.
         emitMoveConflict(pieceId);
         // AD-6: the optimistic local mutation is simply abandoned — no
         // automatic retry that would overwrite server state — and the next
@@ -383,30 +375,21 @@ export function createRoomCollections({
         throw new Error(result.error.code);
       }
 
-      // Story 3.11 AC #4: fires only when the client's own prediction
-      // (`predictFrameLock`) said this specific piece would lock, and the
-      // server's own re-validation disagreed anyway (`result.placed ===
-      // false`) — a genuine concurrent conflict, something changed between
-      // the client's snapshot and the server's transaction. Code review fix
-      // (2026-09-02): `changes.placedRow != null` alone is not that signal —
-      // `placedRow` is set optimistically on *every* Frame-slot drop
-      // regardless of prediction (AC #3 requires the server always gets a
-      // real chance to lock it in), so `result.placed === false` is the
-      // ordinary, frequent outcome of a predicted-invalid drop too, not just
-      // a rare race. `consumeAndCheckPredictedLock` is the actual "did the
-      // client expect this to work" signal, recorded by `predictFrameLock`'s
-      // caller at drag-end — see `placement-conflict-events.ts`.
-      //
-      // Code review fix (2026-09-02): this used to be the third operand of
-      // one `&&` chain (`changes.placedRow != null && result.placed ===
-      // false && consumeAndCheckPredictedLock(pieceId)`) — `&&`
-      // short-circuits, so on `result.placed === true` (every ordinary
-      // *successful* lock, the common case) the registry entry for this
-      // piece was never consumed at all, leaking one entry per successful
-      // predicted-valid placement for the lifetime of the tab. Consuming it
-      // unconditionally whenever a Frame-slot drop was attempted — success
-      // or failure — drains the registry every time, regardless of outcome.
-      const wasPredictedLock = changes.placedRow != null && consumeAndCheckPredictedLock(pieceId);
+      // Story 3.11 AC #4 / Story 3.19: fires only when the client's own
+      // prediction (`predict-drop.ts`'s `predictDropOutcome`) said this
+      // specific drop would place the piece, and the server's own
+      // re-validation disagreed anyway (`result.placed === false`) — a
+      // genuine concurrent conflict, something changed between the
+      // client's snapshot and the server's transaction.
+      // `consumeAndCheckPredictedLock` is the actual "did the client expect
+      // this to work" signal, recorded by the prediction's caller at
+      // drag-end — see `placement-conflict-events.ts`. Consumed
+      // unconditionally on *every* move (not gated on any particular
+      // `changes` field — every drop is a placement attempt now, not just a
+      // near-Frame-slot one), draining the registry every time regardless
+      // of outcome; a move the client never predicted as a placement simply
+      // reads back `false` here, a no-op.
+      const wasPredictedLock = consumeAndCheckPredictedLock(pieceId);
       if (wasPredictedLock && result.placed === false) {
         emitPlacementConflict();
       }
