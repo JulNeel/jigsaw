@@ -1093,17 +1093,52 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // adds the `clusters` collection on the same channel). `initialPieces`/
   // `initialClusters` are only ever read once at creation — `room.id` is
   // the only real dependency.
-  const { pieceCollection, clusterCollection } = useMemo(
-    () =>
-      createRoomCollections({
+  //
+  // Bug fix (2026-09-13, user report: one Participant's own tab silently
+  // stopped receiving Realtime updates for a specific piece — heartbeats on
+  // the WebSocket kept flowing, a fresh tab on the same Room showed the
+  // correct state, only a reload fixed it): this used to be a plain
+  // `useMemo`, whose factory has a real side effect (`createRoomCollections`
+  // opens a Supabase Realtime channel/socket via `ensureChannel`) — but
+  // `useMemo` has no cleanup mechanism, and the Next.js App Router runs
+  // React Strict Mode by default in development, which deliberately
+  // invokes a `useMemo` factory *twice* to surface exactly this kind of
+  // impurity. The first invocation's channel/socket was never released,
+  // leaking a second, orphaned Realtime subscription for the same Room
+  // every time this component mounted — the two WebSocket connections the
+  // user observed in DevTools. A lazy-initialized ref (React's own
+  // recommended pattern for a side effect that must run exactly once even
+  // under Strict Mode's double-render) creates the collections only the
+  // first time `room.id` is seen, since both Strict Mode renders share the
+  // same ref instance.
+  // `react-hooks/refs` (from `eslint-plugin-react-hooks`'s newer, React
+  // Compiler-oriented ruleset) flags every downstream use of a value read
+  // from a ref during render, all the way down to this component's own
+  // JSX far below — this project doesn't enable the actual React Compiler
+  // Babel transform (nothing in `next.config.ts`/`package.json` does), so
+  // this is an advisory-only warning here, not a real transform-safety
+  // violation. Disabled file-wide rather than per line since the taint
+  // tracking's blast radius covers most of this component; revisit this
+  // whole lifecycle (move creation into an effect with a real teardown API
+  // exposed from `createRoomCollections`, since none exists today — see
+  // this ref's own comment) if/when this codebase adopts the compiler.
+  /* eslint-disable react-hooks/refs */
+  const collectionsRef = useRef<{
+    roomId: string;
+    collections: ReturnType<typeof createRoomCollections>;
+  } | null>(null);
+  if (collectionsRef.current === null || collectionsRef.current.roomId !== room.id) {
+    collectionsRef.current = {
+      roomId: room.id,
+      collections: createRoomCollections({
         roomId: room.id,
         initialPieces: room.pieces,
         initialClusters: room.clusters,
         totalPieceCount: room.gridRows * room.gridCols,
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [room.id],
-  );
+    };
+  }
+  const { pieceCollection, clusterCollection } = collectionsRef.current.collections;
   const collection = pieceCollection;
   const { data: livePieces } = useLiveQuery(
     (q) => q.from({ pieces: pieceCollection }),
@@ -1292,16 +1327,16 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // more here than anywhere else this app fires client-side feedback from).
   //
   // `useLayoutEffect`, not `useEffect` — code review fix (2026-09-03): the
-  // collections above are created by `useMemo`, which runs synchronously
-  // during render and opens the Realtime channel immediately. A regular
-  // `useEffect` doesn't run until after the browser has had a chance to
-  // paint, leaving a real window where a Realtime message (delivered via
-  // the WebSocket task queue, never synchronously) could complete the Frame
-  // before this subscription exists — silently losing the one celebration
-  // this whole Room only ever gets once. `useLayoutEffect` runs synchronously
-  // in the same commit as the `useMemo` that opened the channel, with no
-  // point where the event loop could hand control to an incoming message
-  // in between.
+  // collections above are created during render itself (the lazy-ref
+  // pattern above), which opens the Realtime channel immediately. A
+  // regular `useEffect` doesn't run until after the browser has had a
+  // chance to paint, leaving a real window where a Realtime message
+  // (delivered via the WebSocket task queue, never synchronously) could
+  // complete the Frame before this subscription exists — silently losing
+  // the one celebration this whole Room only ever gets once.
+  // `useLayoutEffect` runs synchronously in the same commit as the render
+  // that opened the channel, with no point where the event loop could hand
+  // control to an incoming message in between.
   useLayoutEffect(() => {
     return subscribeFrameComplete(() => {
       if (!muted) {
