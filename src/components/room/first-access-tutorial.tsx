@@ -12,6 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
+import { TutorialStep } from "@/components/ui/tutorial-step";
 import { getSafeSessionStorage, hasSeenTutorial, markTutorialSeen } from "@/lib/rooms/tutorial-seen";
 
 const STEPS = [
@@ -94,16 +96,13 @@ export function FirstAccessTutorial({
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          {STEPS.map(({ icon: Icon, titleKey, descriptionKey }) => (
-            <div key={titleKey} className="flex items-start gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent-foreground">
-                <Icon className="size-4" aria-hidden="true" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">{t(titleKey)}</p>
-                <p className="text-sm text-muted-foreground">{t(descriptionKey)}</p>
-              </div>
-            </div>
+          {STEPS.map(({ icon, titleKey, descriptionKey }) => (
+            <TutorialStep
+              key={titleKey}
+              icon={icon}
+              title={t(titleKey)}
+              description={t(descriptionKey)}
+            />
           ))}
         </div>
 
@@ -128,13 +127,11 @@ export function FirstAccessTutorial({
             focus target — its `absolute` positioning keeps it visually in
             the top-right corner regardless of source order. */}
         <DialogClose asChild>
-          <Button
-            variant="ghost"
+          <IconButton
+            icon={X}
+            label={t("closeAriaLabel")}
             className="absolute top-2 right-2 min-h-11 min-w-11"
-            aria-label={t("closeAriaLabel")}
-          >
-            <X className="size-4" aria-hidden="true" />
-          </Button>
+          />
         </DialogClose>
       </DialogContent>
     </Dialog>

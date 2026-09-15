@@ -1,10 +1,14 @@
 "use client";
 
 import { startTransition, useEffect, useId, useRef, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Field, fieldErrorId } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { ImageChoiceTile } from "@/components/ui/image-choice-tile";
 import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
 import { validateUploadedImage } from "@/lib/rooms/validate-uploaded-image";
 import { getImageDimensions } from "@/lib/rooms/get-image-dimensions";
@@ -315,9 +319,9 @@ export function CreateRoomForm() {
 
     return (
       <div className="flex flex-col gap-4">
-        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent-foreground">
+        <Badge tone="primary" className="w-fit">
           {tCreate("successBadge")}
-        </span>
+        </Badge>
         <div>
           <h2 className="text-lg font-semibold">
             {tCreate("successHeading", { name: successResult.name })}
@@ -360,19 +364,15 @@ export function CreateRoomForm() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <label htmlFor={roomNameId} className="text-sm font-semibold">
-          {tCreate("roomNameLabel")}
-        </label>
-        <input
+      <Field label={tCreate("roomNameLabel")} htmlFor={roomNameId}>
+        <Input
           id={roomNameId}
           type="text"
           value={roomName}
           onChange={(event) => setRoomName(event.target.value)}
           placeholder={tCreate("roomNamePlaceholder")}
-          className="rounded-lg border border-border bg-background p-2 text-sm"
         />
-      </div>
+      </Field>
 
       <div className="flex flex-col gap-2">
         <label className="text-sm font-semibold">{tCreate("imageLabel")}</label>
@@ -382,23 +382,14 @@ export function CreateRoomForm() {
             const isSelected =
               selectedImage?.kind === "library" && selectedImage.id === image.id;
             return (
-              <button
+              <ImageChoiceTile
                 key={image.id}
-                type="button"
+                src={image.src}
+                alt={image.alt}
+                sizes="120px"
+                selected={isSelected}
                 onClick={() => handleLibrarySelect(image.id)}
-                aria-pressed={isSelected}
-                className={`relative aspect-square overflow-hidden rounded-lg ${
-                  isSelected ? "outline outline-3 outline-offset-2 outline-primary" : ""
-                }`}
-              >
-                <Image
-                  src={image.src}
-                  alt={image.alt}
-                  fill
-                  sizes="120px"
-                  className="object-cover"
-                />
-              </button>
+              />
             );
           })}
         </div>
@@ -432,19 +423,30 @@ export function CreateRoomForm() {
         )}
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor={pieceCountId} className="text-sm font-semibold">
-          {tCreate("pieceCountLabel")}
-        </label>
-        <select
+      <Field
+        label={tCreate("pieceCountLabel")}
+        htmlFor={pieceCountId}
+        error={
+          resolutionWarningCount !== null
+            ? suggestedPieceCount !== null
+              ? tCreate("resolutionWarningWithSuggestion", {
+                  pieceCount: resolutionWarningCount,
+                  suggestedCount: suggestedPieceCount,
+                })
+              : tCreate("resolutionWarningNoSuggestion", {
+                  pieceCount: resolutionWarningCount,
+                })
+            : undefined
+        }
+      >
+        <Select
           id={pieceCountId}
           value={pieceCount ?? ""}
           disabled={imageDimensions === null}
           onChange={(event) => setPieceCount(Number(event.target.value))}
           aria-describedby={
-            resolutionWarningCount !== null ? `${pieceCountId}-warning` : undefined
+            resolutionWarningCount !== null ? fieldErrorId(pieceCountId) : undefined
           }
-          className="rounded-lg border border-border bg-background p-2 text-sm"
         >
           <option value="" disabled>
             {isProbingDimensions
@@ -463,25 +465,8 @@ export function CreateRoomForm() {
               </option>
             );
           })}
-        </select>
-
-        {resolutionWarningCount !== null && (
-          <p
-            id={`${pieceCountId}-warning`}
-            role="alert"
-            className="text-sm text-destructive"
-          >
-            {suggestedPieceCount !== null
-              ? tCreate("resolutionWarningWithSuggestion", {
-                  pieceCount: resolutionWarningCount,
-                  suggestedCount: suggestedPieceCount,
-                })
-              : tCreate("resolutionWarningNoSuggestion", {
-                  pieceCount: resolutionWarningCount,
-                })}
-          </p>
-        )}
-      </div>
+        </Select>
+      </Field>
 
       {submitError && (
         <p role="alert" className="text-sm text-destructive">

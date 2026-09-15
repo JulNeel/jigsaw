@@ -1,10 +1,12 @@
-import Link from "next/link";
 import Image from "next/image";
 import { getTranslations } from "next-intl/server";
 import { getRoomsForUser, type Room } from "@/lib/rooms/get-rooms-for-user";
 import { formatRoomProgress } from "@/lib/rooms/format-room-progress";
 import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
 import { DeleteRoomButton } from "@/app/delete-room-button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { RoomListItem } from "@/components/ui/room-list-item";
+import { PresenceDot } from "@/components/ui/presence-dot";
 
 function RoomThumbnail({ room }: { room: Room }) {
   // Library-sourced Rooms can show their real cover image — it's already a
@@ -59,17 +61,7 @@ export async function RoomList({ userId }: { userId: string }) {
   }
 
   if (rooms.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16 text-center">
-        <span className="text-4xl" aria-hidden="true">
-          🧩
-        </span>
-        <h2 className="text-lg font-semibold">{tHome("emptyTitle")}</h2>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          {tHome("emptyBody")}
-        </p>
-      </div>
-    );
+    return <EmptyState title={tHome("emptyTitle")} body={tHome("emptyBody")} />;
   }
 
   return (
@@ -77,27 +69,29 @@ export async function RoomList({ userId }: { userId: string }) {
       {rooms.map((room) => {
         const isComplete = room.piecesPlaced === room.pieceCount;
         return (
-          <li
+          <RoomListItem
             key={room.id}
-            className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-muted"
-          >
-            <Link
-              href={`/room/${room.inviteSlug}`}
-              className="flex flex-1 items-center gap-3 overflow-hidden"
-            >
-              <RoomThumbnail room={room} />
-              <div className="flex flex-1 flex-col">
-                <span className="text-sm font-semibold">{room.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {formatRoomProgress(room.piecesPlaced, room.pieceCount, tRooms)}
-                  {isComplete
-                    ? ` · ${tHome("roomComplete")}`
-                    : ` · ${tHome("roomOnline", { count: room.onlineCount })}`}
-                </span>
-              </div>
-            </Link>
-            <DeleteRoomButton roomId={room.id} roomName={room.name} />
-          </li>
+            href={`/room/${room.inviteSlug}`}
+            thumbnail={<RoomThumbnail room={room} />}
+            name={room.name}
+            meta={
+              <>
+                {formatRoomProgress(room.piecesPlaced, room.pieceCount, tRooms)}
+                <span aria-hidden="true">·</span>
+                {isComplete ? (
+                  <span className="font-medium text-primary">{tHome("roomComplete")}</span>
+                ) : room.onlineCount > 0 ? (
+                  <span className="inline-flex items-center gap-1 font-medium text-brand-accent-hover">
+                    <PresenceDot />
+                    {tHome("roomOnline", { count: room.onlineCount })}
+                  </span>
+                ) : (
+                  tHome("roomOnline", { count: room.onlineCount })
+                )}
+              </>
+            }
+            action={<DeleteRoomButton roomId={room.id} roomName={room.name} />}
+          />
         );
       })}
     </ul>
