@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ImageIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
+import { CanvasFab } from "@/components/ui/canvas-fab";
 
 // Press-and-hold, not a toggle (Story 3.14) — a physical puzzle's box lid
 // is glanced at, not kept propped open. Pointer Events (not separate
@@ -32,18 +32,17 @@ export function ReferenceImageButton({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
+      <CanvasFab
+        stackSlot={2}
         disabled={referenceImageUrl == null}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         aria-label={t("referenceImageAriaLabel")}
-        className="absolute right-6 bottom-[calc(env(safe-area-inset-bottom)+9.5rem)] z-10 size-12 rounded-full shadow-md touch-none select-none"
+        className="touch-none select-none"
       >
         <ImageIcon className="size-5" aria-hidden="true" />
-      </Button>
+      </CanvasFab>
 
       {isShowing && referenceImageUrl != null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95">

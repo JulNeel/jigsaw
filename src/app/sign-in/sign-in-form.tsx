@@ -3,6 +3,8 @@
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { Field, fieldErrorId } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { signIn, type SignInState } from "@/lib/auth/actions";
 
 const initialState: SignInState = {};
@@ -16,53 +18,39 @@ export function SignInForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <label htmlFor="sign-in-email" className="text-sm font-semibold">
-          {t("emailLabel")}
-        </label>
-        <input
+      <Field
+        label={t("emailLabel")}
+        htmlFor="sign-in-email"
+        error={state.error?.field === "email" ? state.error.message : undefined}
+      >
+        <Input
           id="sign-in-email"
           name="email"
           type="email"
           required
           autoComplete="email"
-          aria-describedby={
-            state.error?.field === "email" ? "sign-in-email-error" : undefined
-          }
+          aria-describedby={state.error?.field === "email" ? fieldErrorId("sign-in-email") : undefined}
           aria-invalid={state.error?.field === "email" || undefined}
-          className="rounded-lg border border-border bg-background p-2 text-sm"
         />
-        {state.error?.field === "email" && (
-          <p id="sign-in-email-error" role="alert" className="text-sm text-destructive">
-            {state.error.message}
-          </p>
-        )}
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="sign-in-password" className="text-sm font-semibold">
-          {t("passwordLabel")}
-        </label>
-        <input
+      <Field
+        label={t("passwordLabel")}
+        htmlFor="sign-in-password"
+        error={state.error?.field === "password" ? state.error.message : undefined}
+      >
+        <Input
           id="sign-in-password"
           name="password"
           type="password"
           required
           autoComplete="current-password"
           aria-describedby={
-            state.error?.field === "password"
-              ? "sign-in-password-error"
-              : undefined
+            state.error?.field === "password" ? fieldErrorId("sign-in-password") : undefined
           }
           aria-invalid={state.error?.field === "password" || undefined}
-          className="rounded-lg border border-border bg-background p-2 text-sm"
         />
-        {state.error?.field === "password" && (
-          <p id="sign-in-password-error" role="alert" className="text-sm text-destructive">
-            {state.error.message}
-          </p>
-        )}
-      </div>
+      </Field>
 
       {state.error?.field === "general" && (
         <p role="alert" className="text-sm text-destructive">

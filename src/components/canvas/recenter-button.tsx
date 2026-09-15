@@ -2,7 +2,7 @@
 
 import { Crosshair } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
+import { CanvasFab } from "@/components/ui/canvas-fab";
 
 // Always visible regardless of pan/zoom state or Guest/Participant status
 // (unlike Story 3.2's Guest-only tutorial). `disabled` while the Canvas
@@ -18,15 +18,13 @@ export function RecenterButton({
   const t = useTranslations("Canvas");
 
   return (
-    <Button
-      type="button"
-      variant="outline"
+    <CanvasFab
+      stackSlot={0}
       onClick={onClick}
       disabled={disabled}
       aria-label={t("recenterAriaLabel")}
-      className="absolute right-6 bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] z-10 size-12 rounded-full shadow-md"
     >
       <Crosshair className="size-5" aria-hidden="true" />
-    </Button>
+    </CanvasFab>
   );
 }
