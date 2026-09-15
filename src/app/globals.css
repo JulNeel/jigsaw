@@ -53,6 +53,32 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-subtle-foreground: var(--primary-subtle-foreground);
+  --color-brand-accent-hover: var(--brand-accent-hover);
+  --color-brand-accent-foreground: var(--brand-accent-foreground);
+  --color-brand-accent-subtle: var(--brand-accent-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-destructive-subtle: var(--destructive-subtle);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-player-1: var(--player-1);
+  --color-player-2: var(--player-2);
+  --color-player-3: var(--player-3);
+  --color-player-4: var(--player-4);
+  --color-player-5: var(--player-5);
+  --color-player-6: var(--player-6);
+  --color-player-foreground: var(--player-foreground);
+  /* Design system v2 (Claude Design canvas, 2026-09): overrides Tailwind's
+     own default shadow scale with the app's warm-tinted values, so every
+     existing `shadow-md`/`shadow-lg` usage (e.g. the canvas's floating
+     action buttons) restyles automatically — no class-name changes needed
+     anywhere that already uses these utilities. */
+  --shadow-xs: 0 1px 2px rgba(43, 38, 33, 0.06);
+  --shadow-sm: 0 1px 3px rgba(43, 38, 33, 0.08), 0 1px 2px rgba(43, 38, 33, 0.04);
+  --shadow-md: 0 4px 10px rgba(43, 38, 33, 0.10), 0 1px 3px rgba(43, 38, 33, 0.06);
+  --shadow-lg: 0 10px 28px rgba(43, 38, 33, 0.14);
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);
 }
 
 :root {
@@ -61,26 +87,53 @@
      muted-foreground (on background and muted), ring, and brand-accent (see
      DESIGN.md Colors). The untouched shadcn defaults below (secondary, input,
      chart-*, sidebar-*, and the whole .dark block) are NOT part of that
-     verification — they carry shadcn's own presumed-AA neutral defaults, unreviewed. */
+     verification — they carry shadcn's own presumed-AA neutral defaults, unreviewed.
+     Design system v2 (2026-09, Claude Design canvas): primary/brand-accent/
+     destructive replaced (terracotta → deep green, gold → raspberry), plus
+     new -hover/-subtle variants and per-player identity colors added below —
+     everything else in this block is unchanged from v1. */
   --background: #fbf7f1;
   --foreground: #2b2621;
   --card: #fffdf9;
   --card-foreground: #2b2621;
   --popover: #fffdf9;
   --popover-foreground: #2b2621;
-  --primary: #a8541f;
+  --primary: #1d5b3a;
   --primary-foreground: #ffffff;
+  --primary-hover: #123a25;
+  --primary-subtle: #e9f1ec;
+  --primary-subtle-foreground: #123a25;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: #efe6d8;
   --muted-foreground: #6e6153;
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --brand-accent: #a67518;
-  --destructive: oklch(0.577 0.245 27.325);
+  /* Live-presence / completion only — never chrome, never decoration
+     (DESIGN.md). */
+  --brand-accent: #c42a5c;
+  --brand-accent-hover: #a31f4a;
+  --brand-accent-foreground: #ffffff;
+  --brand-accent-subtle: #fbeaf0;
+  --destructive: #b3261e;
+  --destructive-foreground: #ffffff;
+  --destructive-subtle: #fbeceb;
   --border: #e3d6c2;
+  --border-strong: #a79885;
   --input: oklch(0.922 0 0);
-  --ring: #a8541f;
+  --ring: #1d5b3a;
+  /* Participant identity colours (Epic 4, not built yet) — one per person in
+     a Salon, six hues at matched lightness/chroma so no player reads as more
+     important than another; all clear 4.5:1 on --background and take white
+     text at 4.5:1+. Added now (unused) since they're part of the same
+     canvas's token set and cost nothing to have ready. */
+  --player-1: #c4572b;
+  --player-2: #2f7a57;
+  --player-3: #2b6fa8;
+  --player-4: #b03a6b;
+  --player-5: #7a5fb0;
+  --player-6: #8a6c18;
+  --player-foreground: #ffffff;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
