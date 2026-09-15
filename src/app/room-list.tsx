@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { getRoomsForUser, type Room } from "@/lib/rooms/get-rooms-for-user";
 import { formatRoomProgress } from "@/lib/rooms/format-room-progress";
 import { LIBRARY_IMAGES } from "@/lib/rooms/library-images";
+import { DeleteRoomButton } from "@/app/delete-room-button";
 
 function RoomThumbnail({ room }: { room: Room }) {
   // Library-sourced Rooms can show their real cover image — it's already a
@@ -76,10 +77,13 @@ export async function RoomList({ userId }: { userId: string }) {
       {rooms.map((room) => {
         const isComplete = room.piecesPlaced === room.pieceCount;
         return (
-          <li key={room.id}>
+          <li
+            key={room.id}
+            className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-muted"
+          >
             <Link
               href={`/room/${room.inviteSlug}`}
-              className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-muted"
+              className="flex flex-1 items-center gap-3 overflow-hidden"
             >
               <RoomThumbnail room={room} />
               <div className="flex flex-1 flex-col">
@@ -92,6 +96,7 @@ export async function RoomList({ userId }: { userId: string }) {
                 </span>
               </div>
             </Link>
+            <DeleteRoomButton roomId={room.id} roomName={room.name} />
           </li>
         );
       })}

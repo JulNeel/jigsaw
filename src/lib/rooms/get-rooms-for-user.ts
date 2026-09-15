@@ -15,15 +15,25 @@ export type Room = {
 /**
  * Rooms are read directly from Postgres in a Server Component — not a
  * Server Action, since this is a read, not a mutation (Architecture AD-2
- * governs writes). `piecesPlaced`/`onlineCount` are still static zero:
- * placement (Epic 3) and live presence (Epic 4) don't exist yet.
+ * governs writes). `onlineCount` is still static zero: live presence
+ * (Epic 4) doesn't exist yet. `piecesPlaced` counts `piece.placed_row is
+ * not null` — the same definition of "placed" used everywhere else in
+ * this app (see `get-room-by-slug.ts`, `collections.ts`'s
+ * `confirmedPlacedIds`) — bug fix (2026-09-13, user report: the dashboard
+ * always showed 0 placed regardless of real progress): this was a
+ * hardcoded literal `0`, left over from before Epic 3 shipped placement,
+ * never updated afterward.
  */
 export async function getRoomsForUser(userId: string): Promise<Room[]> {
   const result = await pgPool.query(
-    `select id, name, invite_slug, grid_rows, grid_cols, image_source, image_library_id
-     from room
-     where created_by = $1
-     order by created_at desc`,
+    `select r.id, r.name, r.invite_slug, r.grid_rows, r.grid_cols,
+            r.image_source, r.image_library_id,
+            count(p.id) filter (where p.placed_row is not null) as pieces_placed
+     from room r
+     left join piece p on p.room_id = r.id
+     where r.created_by = $1
+     group by r.id
+     order by r.created_at desc`,
     [userId],
   );
 
@@ -32,7 +42,7 @@ export async function getRoomsForUser(userId: string): Promise<Room[]> {
     name: row.name,
     inviteSlug: row.invite_slug,
     pieceCount: row.grid_rows * row.grid_cols,
-    piecesPlaced: 0,
+    piecesPlaced: Number(row.pieces_placed),
     onlineCount: 0,
     imageSource: row.image_source,
     imageLibraryId: row.image_library_id,
