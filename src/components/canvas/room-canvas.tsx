@@ -1155,6 +1155,16 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
     [clusters],
   );
 
+  // Konva draws to a canvas context and can't resolve CSS var() itself —
+  // read the computed value once. Safe: RoomCanvas only ever mounts via
+  // RoomCanvasClient's `ssr: false` dynamic import, so `document` exists.
+  const frameOutlineColor = useMemo(
+    () =>
+      getComputedStyle(document.documentElement).getPropertyValue("--frame-outline").trim() ||
+      "#f7df20",
+    [],
+  );
+
   const { halfExtentX, halfExtentY, frameWidth, frameHeight } = useMemo(() => {
     const frameWidth = room.gridCols * room.tileWidth;
     const frameHeight = room.gridRows * room.tileHeight;
@@ -2049,7 +2059,11 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   );
 
   return (
-    <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
+    <div
+      ref={containerRef}
+      className="absolute inset-0 bg-(--surface-canvas)"
+      style={{ touchAction: "none" }}
+    >
       <Stage
         ref={stageRef}
         width={stageSize.width}
@@ -2074,7 +2088,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
             y={-frameHeight / 2}
             width={frameWidth}
             height={frameHeight}
-            stroke="#A8541F"
+            stroke={frameOutlineColor}
             strokeWidth={3 / clampedScale}
             // Story 3.18 bug fix (user report: single-finger pan still
             // worked *inside* the Frame's own rectangle, after otherwise
