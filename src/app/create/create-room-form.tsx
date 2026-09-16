@@ -338,7 +338,7 @@ export function CreateRoomForm() {
           </Button>
         </div>
 
-        <Button asChild className="min-h-11 w-full">
+        <Button asChild size="cta">
           <Link href={successResult.inviteUrl}>{tCreate("goToRoom")}</Link>
         </Button>
 
@@ -474,7 +474,7 @@ export function CreateRoomForm() {
         </p>
       )}
 
-      <Button type="button" disabled={!canSubmit} onClick={handleSubmit}>
+      <Button type="button" disabled={!canSubmit} onClick={handleSubmit} size="cta">
         {isSubmitting ? tCreate(`submitPending_${submitStage}`) : tCreate("submit")}
       </Button>
     </div>

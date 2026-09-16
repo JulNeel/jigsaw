@@ -58,7 +58,7 @@ export function SignUpForm() {
         </p>
       )}
 
-      <Button type="submit" disabled={isPending} className="min-h-11 w-full">
+      <Button type="submit" disabled={isPending} size="cta">
         {isPending ? t("signUpSubmitPending") : t("signUpSubmit")}
       </Button>
     </form>
