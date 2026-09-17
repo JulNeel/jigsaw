@@ -64,7 +64,7 @@ export default async function RoomPage({
         <Link
           href={isGuest ? "/sign-in" : "/"}
           aria-label={isGuest ? t("signInAriaLabel") : t("backToHomeAriaLabel")}
-          className="flex size-9 items-center justify-center rounded-full bg-background/80 shadow-sm backdrop-blur-sm"
+          className="flex size-9 items-center justify-center rounded-full border border-border bg-card/90 shadow-sm backdrop-blur-sm"
         >
           {isGuest ? (
             <LogIn className="size-4" aria-hidden="true" />
@@ -72,7 +72,7 @@ export default async function RoomPage({
             <Home className="size-4" aria-hidden="true" />
           )}
         </Link>
-        <h1 className="pointer-events-none rounded-md bg-background/80 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
+        <h1 className="pointer-events-none rounded-md border border-border bg-card/90 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
           {room.name}
         </h1>
       </div>

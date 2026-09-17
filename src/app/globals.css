@@ -82,119 +82,94 @@
 }
 
 :root {
-  /* Jigsaw colour system — Chicory Coffee, dark throughout (lobby, Salon
-     creation, auth, canvas). Two rules that run through every component:
-     (1) Summer Sun and the six Participant colours are LIGHT and always
-     carry dark ink (--primary-foreground / --player-foreground), never
-     white; (2) depth is made with fill lightness, not shadow — a card is
-     lighter than the page, a field darker than the card.
+  /* Jigsaw colour system — Tangerine & Grape. Vif et chaleureux : primaire
+     Tangerine, accent vivant Grape, fond ivoire clair partout (page et
+     canevas). Source : design_handoff_jigsaw_design_system/tokens/colors.css
+     et tokens/players.css. */
+  --ivory-50: #fffefb;
+  --ivory-100: #fffbf2; /* la page */
+  --ivory-200: #fff2de; /* la ligne sélectionnée */
+  --sand-300: #ffe3be; /* bordures */
+  --sand-400: #ffc066; /* bordure forte */
+  --clay-600: #8c7452; /* texte secondaire */
+  --ink: #3a2a12;
+  --ink-soft: #6b573a;
 
-     — Chicory Coffee ramp — */
-  --coffee-950: #1c1413; /* sunken: inputs, share fields */
-  --coffee-850: #3f302b; /* the page */
-  --coffee-800: #4a3835; /* the canvas mat */
-  --coffee-750: #584439; /* cards, dialogs */
-  --coffee-700: #5c4a44; /* muted fill, hover, selected */
-  --coffee-600: #7a6259; /* borders */
-  --coffee-400: #a08880; /* FAB border on the mat — lifted for 3:1 */
-  --coffee-300: #b3a099; /* secondary text — must clear 4.5:1 on --coffee-700
-                            (the selected row), not just on a card */
-  --coffee-50: #f7f1ec; /* primary text */
-  --coffee-ink: #241a18; /* dark ink for text ON the light accents */
+  --tangerine-500: #ff8a1e;
+  --tangerine-600: #e87710;
+  --tangerine-subtle: #fff0dc;
 
-  /* — Summer Sun (primary) — */
-  --sun-500: #f7df20; /* Summer Sun 12-0650 */
-  --sun-600: #e0c918;
-  --sun-subtle: #4a3c1c; /* yellow-tinted dark fill */
+  --grape-500: #8b5cf6; /* pastilles, halos */
+  --grape-700: #6d3fd1; /* la valeur TEXTE — 5,3:1 sur une carte blanche */
+  --grape-subtle: #f1eaff;
 
-  /* — Swim Cap (the live signal) — */
-  --swim-500: #0098d4; /* Swim Cap 16-4526 — fills and dots */
-  --swim-400: #3db8ed; /* the TEXT value: 4.5:1+ at 12px */
-  --swim-subtle: #1e3a4a;
-
-  /* — Semantic — */
-  --background: var(--coffee-850);
-  --foreground: var(--coffee-50);
-  --card: var(--coffee-750);
-  --card-foreground: var(--coffee-50);
-  --popover: var(--coffee-750);
-  --popover-foreground: var(--coffee-50);
-  --muted: var(--coffee-700);
-  --muted-foreground: var(--coffee-300);
-  --border: var(--coffee-600);
-  --border-strong: var(--coffee-400);
-  --input: var(--coffee-600);
+  --background: var(--ivory-100);
+  --foreground: var(--ink);
+  --card: var(--ivory-50);
+  --card-foreground: var(--ink);
+  --popover: var(--ivory-50);
+  --popover-foreground: var(--ink);
+  --muted: var(--ivory-200);
+  --muted-foreground: var(--clay-600);
+  --border: var(--sand-300);
+  --border-strong: var(--sand-400);
+  --input: var(--sand-300);
 
   /* shadcn's own generic secondary/accent slots — not part of the handoff's
      colors.css (it only defines the app's own semantic tokens), but
-     `secondary` is actively used by Button's `secondary` variant, and
-     leaving it at v1's light `oklch(0.97 0 0)` would render a near-white
-     pill on this dark ground. Aligned to the same fill/text pair `muted`
-     already uses (matching `ghost`/`outline`'s own treatment) rather than
-     inventing a new tone with no spec — flagging for confirmation, not a
-     silent guess to leave undiscussed. */
-  --secondary: var(--coffee-700);
-  --secondary-foreground: var(--coffee-50);
-  --accent: var(--coffee-700);
-  --accent-foreground: var(--coffee-50);
+     `secondary` is actively used by Button's `secondary` variant. Aligned to
+     the same fill/text pair `muted` already uses, matching how the previous
+     theme resolved this gap. */
+  --secondary: var(--ivory-200);
+  --secondary-foreground: var(--ink);
+  --accent: var(--ivory-200);
+  --accent-foreground: var(--ink);
 
-  --primary: var(--sun-500);
-  --primary-hover: var(--sun-600);
-  --primary-foreground: var(--coffee-ink); /* dark ink on yellow — never white */
-  --primary-subtle: var(--sun-subtle);
-  --primary-subtle-foreground: var(--sun-500);
+  --primary: var(--tangerine-500);
+  --primary-hover: var(--tangerine-600);
+  --primary-foreground: #ffffff;
+  --primary-subtle: var(--tangerine-subtle);
+  --primary-subtle-foreground: var(--tangerine-600);
 
-  /* Completion. Yellow reads at 9.9:1 on a card, so the achievement voice is
-     the primary hue itself — always as a filled badge or a short label,
-     never as a second button. */
-  --success: var(--sun-500);
+  --success: #2fb67c;
 
-  /* Live presence only — never chrome, never decoration.
-     --brand-accent is the TEXT value: the strings it carries ("3 en ligne")
-     render at 12px and need 4.5:1. Swim Cap itself (--brand-accent-fill) is
-     the fill value for dots/halos/pills. */
-  --brand-accent: var(--swim-400);
-  --brand-accent-hover: #62c9f2;
-  --brand-accent-fill: var(--swim-500);
-  --brand-accent-foreground: var(--coffee-ink);
-  --brand-accent-subtle: var(--swim-subtle);
+  --brand-accent: var(--grape-700);
+  --brand-accent-hover: #5a34ad;
+  --brand-accent-fill: var(--grape-500);
+  --brand-accent-foreground: #ffffff;
+  --brand-accent-subtle: var(--grape-subtle);
 
-  --ring: var(--sun-500);
-  --destructive: #f8988e; /* raised from #f27a6e — 4.3:1 on the lighter card no longer sufficed */
-  --destructive-foreground: var(--coffee-ink);
-  --destructive-subtle: #4a2422;
+  --ring: var(--grape-700);
+  --destructive: #d1453a;
+  --destructive-foreground: #ffffff;
+  --destructive-subtle: #fbe6e2;
 
   /* Text aliases */
-  --text-body: var(--coffee-50);
-  --text-secondary: var(--coffee-300);
-  --text-on-primary: var(--coffee-ink);
+  --text-body: var(--ink);
+  --text-secondary: var(--clay-600);
+  --text-on-primary: #ffffff;
 
   /* Surface aliases */
-  --surface-page: var(--coffee-850);
-  --surface-card: var(--coffee-750);
-  --surface-sunken: var(--coffee-950);
-  --surface-selected: var(--coffee-700);
+  --surface-page: var(--ivory-100);
+  --surface-card: var(--ivory-50);
+  --surface-sunken: var(--ivory-200);
+  --surface-selected: var(--ivory-200);
 
-  /* The canvas mat sits one step darker than a card, so the floating
-     controls (which are --muted) separate from it without a shadow. */
-  --surface-canvas: var(--coffee-800);
-  --canvas-foreground: var(--coffee-50);
-  --canvas-foreground-soft: var(--coffee-300);
-  --frame-outline: var(--sun-500);
-  --piece-halo: color-mix(in oklch, var(--swim-500) 75%, transparent);
+  --surface-canvas: #fdf4e4;
+  --canvas-foreground: var(--ink);
+  --canvas-foreground-soft: var(--ink-soft);
+  --frame-outline: var(--tangerine-500);
+  --piece-halo: color-mix(in oklch, var(--grape-500) 40%, transparent);
 
-  /* Participant identity colours — one per person in a Salon, six hues at
-     matched lightness so no player reads as more important than another;
-     all clear 3:1 against this dark ground and take dark ink, never white.
-     None of them is Summer Sun — a Participant must never be mistaken for
-     the primary action. */
-  --player-1: #e0703f; /* terre cuite */
-  --player-2: #5fbf8a; /* vert */
-  --player-3: #58a3d8; /* bleu */
-  --player-4: #e37ba6; /* rose */
-  --player-5: #a98ddd; /* violet */
-  --player-6: #4fc2c2; /* turquoise */
-  --player-foreground: var(--coffee-ink);
+  /* Couleurs de Participant — vives, assorties à la palette, encre blanche
+     dessus. */
+  --player-1: #ff8a1e;
+  --player-2: #8b5cf6;
+  --player-3: #2fb67c;
+  --player-4: #e0507a;
+  --player-5: #3b7fc4;
+  --player-6: #d1a300;
+  --player-foreground: #ffffff;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);

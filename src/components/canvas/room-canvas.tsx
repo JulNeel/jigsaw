@@ -1161,7 +1161,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   const frameOutlineColor = useMemo(
     () =>
       getComputedStyle(document.documentElement).getPropertyValue("--frame-outline").trim() ||
-      "#f7df20",
+      "#ff8a1e",
     [],
   );
 
