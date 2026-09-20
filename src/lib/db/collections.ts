@@ -5,9 +5,17 @@
  *
  * `createRoomCollections` is a fully custom `sync`, not
  * `@tanstack/electric-db-collection` — see Story 3.5's Dev Notes for why
- * (Electric Cloud's discontinuation). It syncs exclusively through one
+ * (Electric Cloud's discontinuation). Live updates arrive through one
  * Supabase Realtime channel per Room (Architecture AD-1) — never polling,
  * never a second channel.
+ *
+ * Amended 2026-09-20: that channel is no longer treated as infallible. It
+ * can stop delivering while still reporting itself SUBSCRIBED, leaving a
+ * client silently stuck on a stale view with no way to notice — measured,
+ * not assumed (`e2e/realtime-gap.e2e.ts`). `resyncRoom` re-reads the Room
+ * and folds it back through the same write path, on the three occasions
+ * this client can tell its own view is wrong. Still no polling and still no
+ * second channel: these are plain reads, triggered by events, never a timer.
  *
  * Story 3.8 splits piece position into two collections sharing that one
  * channel: `pieces` (mostly unchanged) and `clusters` (a Cluster's free-
@@ -19,6 +27,7 @@
 import { createCollection } from "@tanstack/db";
 import { createClient } from "@/lib/auth/supabase-browser";
 import { movePiece, rotatePiece } from "@/lib/rooms/piece-actions";
+import { fetchRoomState } from "@/lib/rooms/room-state";
 import {
   consumeAndCheckPredictedLock,
   emitPlacementConflict,
@@ -146,20 +155,30 @@ export function createRoomCollections({
         },
       };
       const timeoutId = setTimeout(() => {
-        const pending = pendingByPieceId.get(pieceId);
-        if (pending) {
+        // Before giving up, go and look. This write very often *did* land —
+        // the channel simply stopped delivering — and in that case rolling
+        // the optimistic move back would throw away a correct write and jump
+        // the piece home to a stale position, which is exactly the bug this
+        // exists to stop. `resyncRoom` folds the true row through the normal
+        // path, so if the version did arrive, `entry.resolve` has already run
+        // and been removed from the pending list by the time we look.
+        void resyncRoom().finally(() => {
+          const pending = pendingByPieceId.get(pieceId);
+          if (!pending?.includes(entry)) {
+            return;
+          }
           const stillWaiting = pending.filter((p) => p !== entry);
           if (stillWaiting.length > 0) {
             pendingByPieceId.set(pieceId, stillWaiting);
           } else {
             pendingByPieceId.delete(pieceId);
           }
-        }
-        reject(
-          new Error(
-            `Timed out waiting for piece ${pieceId} to reach version ${version} via Realtime`,
-          ),
-        );
+          reject(
+            new Error(
+              `Timed out waiting for piece ${pieceId} to reach version ${version} via Realtime`,
+            ),
+          );
+        });
       }, AWAIT_VERSION_TIMEOUT_MS);
       const existing = pendingByPieceId.get(pieceId) ?? [];
       existing.push(entry);
@@ -185,11 +204,22 @@ export function createRoomCollections({
   // only actually torn down once both have called `releaseChannel`.
   let channelRefCount = 0;
 
+  // A tab that was hidden — backgrounded, the laptop asleep — is where a
+  // connection most often dies without saying so. Reconciling on the way
+  // back costs nothing while the tab is in use, and there is no polling: it
+  // fires on a user action, not a timer.
+  function handleVisibilityChange() {
+    if (document.visibilityState === "visible") {
+      void resyncRoom();
+    }
+  }
+
   function ensureChannel() {
     channelRefCount++;
     if (sharedChannel) {
       return;
     }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     sharedSupabase = createClient();
     sharedChannel = sharedSupabase
       .channel(`room-${roomId}`)
@@ -203,16 +233,75 @@ export function createRoomCollections({
         { event: "*", schema: "public", table: "cluster", filter: `room_id=eq.${roomId}` },
         (payload) => clusterHandler?.(payload),
       )
+      // No status callback: a dead subscription still reports SUBSCRIBED
+      // (measured — see `resyncRoom`), so there is no event here worth
+      // reacting to. Recovery is driven by the detectors that do work.
       .subscribe();
   }
 
   function releaseChannel() {
     channelRefCount--;
     if (channelRefCount <= 0 && sharedSupabase && sharedChannel) {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       sharedSupabase.removeChannel(sharedChannel);
       sharedChannel = null;
       sharedSupabase = null;
     }
+  }
+
+  // One path for a piece row, whether it arrived by Realtime or by a
+  // reconciliation read. Extracted so a resync cannot quietly diverge from
+  // live sync — the placement chime, the frame-completion check and the
+  // pending-write bookkeeping all have to happen either way.
+  let writePieceRow:
+    | ((row: Record<string, unknown>, isInsert: boolean) => void)
+    | null = null;
+
+  function applyPieceRow(row: Record<string, unknown>, isInsert: boolean) {
+    writePieceRow?.(row, isInsert);
+  }
+
+  // Reconciliation: re-read the Room and fold it back through the very same
+  // path a Realtime event takes.
+  //
+  // Needed because the channel can stop delivering while still reporting
+  // itself SUBSCRIBED — observed, not theorised (`e2e/realtime-gap.e2e.ts`).
+  // There is no error to listen for and no reconnect to hook, so the only
+  // workable detectors are the moments this client can tell *on its own*
+  // that its view is wrong: a write of its own that never comes back
+  // confirmed, a write rejected as STALE_WRITE (the server knows something
+  // this client does not), and the tab becoming visible again — the point
+  // where a sleeping connection has most likely died unnoticed.
+  //
+  // Without it the failure is self-sustaining: a rejected write produces no
+  // Realtime event either, so nothing ever repairs the stale version that
+  // caused the rejection, and only a page reload recovers. That closed loop
+  // is the "une pièce revient systématiquement à sa place" report.
+  let resyncInFlight: Promise<void> | null = null;
+
+  function resyncRoom(): Promise<void> {
+    if (resyncInFlight) {
+      return resyncInFlight;
+    }
+    resyncInFlight = fetchRoomState(roomId)
+      .then(({ pieces, clusters }) => {
+        // Clusters first: a piece whose Cluster row hasn't landed yet is
+        // excluded from rendering entirely, so the other order would blink
+        // those pieces out for a frame.
+        replaceClusters?.(clusters);
+        for (const row of pieces) {
+          applyPieceRow(row, false);
+        }
+      })
+      .catch(() => {
+        // A failed repair is not worth surfacing: every trigger recurs (the
+        // next rejected write, the next time the tab is focused), and the
+        // caller's own error is the one the user needs to see.
+      })
+      .finally(() => {
+        resyncInFlight = null;
+      });
+    return resyncInFlight;
   }
 
   const pieceCollection = createCollection<RoomDetailPiece, string>({
@@ -229,18 +318,7 @@ export function createRoomCollections({
         commit();
         markReady();
 
-        ensureChannel();
-        pieceHandler = (payload) => {
-          if (payload.eventType === "DELETE") {
-            // Pieces are never deleted in this app (Architecture: no
-            // "un-place"/removal mechanic exists anywhere in Epic 3) —
-            // handled for completeness, not because it's expected.
-            begin();
-            write({ type: "delete", key: (payload.old as { id: string }).id });
-            commit();
-            return;
-          }
-          const row = payload.new as Record<string, unknown>;
+        writePieceRow = (row, isInsert) => {
           const piece: RoomDetailPiece = {
             id: row.id as string,
             shapeType: row.shape_type as RoomDetailPiece["shapeType"],
@@ -248,6 +326,9 @@ export function createRoomCollections({
             gridCol: row.grid_col as number,
             scatterX: row.scatter_x as number,
             scatterY: row.scatter_y as number,
+            // Signed tile URLs are minted server-side per page load and are
+            // not in the row, so they carry over from the initial snapshot
+            // either way.
             imageUrl: initialPieces.find((p) => p.id === row.id)?.imageUrl ?? null,
             rotation: row.rotation as number,
             placedRow: row.placed_row as number | null,
@@ -258,10 +339,7 @@ export function createRoomCollections({
             clusterOffsetCol: row.cluster_offset_col as number | null,
           };
           begin();
-          write({
-            type: payload.eventType === "INSERT" ? "insert" : "update",
-            value: piece,
-          });
+          write({ type: isInsert ? "insert" : "update", value: piece });
           commit();
           resolvePending(piece.id, piece.version);
           // The confirmed version has caught up to (or passed) this
@@ -288,8 +366,23 @@ export function createRoomCollections({
           }
         };
 
+        ensureChannel();
+        pieceHandler = (payload) => {
+          if (payload.eventType === "DELETE") {
+            // Pieces are never deleted in this app (Architecture: no
+            // "un-place"/removal mechanic exists anywhere in Epic 3) —
+            // handled for completeness, not because it's expected.
+            begin();
+            write({ type: "delete", key: (payload.old as { id: string }).id });
+            commit();
+            return;
+          }
+          applyPieceRow(payload.new as Record<string, unknown>, payload.eventType === "INSERT");
+        };
+
         return () => {
           pieceHandler = null;
+          writePieceRow = null;
           releaseChannel();
         };
       },
@@ -366,12 +459,25 @@ export function createRoomCollections({
         // signal replaced an earlier data-comparison guess. Fires on *any*
         // rejected write.
         emitMoveConflict(pieceId);
+        // A rejection is this client saying something the server disagrees
+        // with, so go and find out what it actually knows before the next
+        // attempt. This matters most for `STALE_WRITE`, where the rejection
+        // is *caused by* a stale cached version: a rejected write produces
+        // no Realtime event of its own, so without this the stale version
+        // that caused the rejection is exactly what the next attempt would
+        // send again — rejected again, forever, until a page reload. Awaited
+        // so the repair has landed before the optimistic change is rolled
+        // back below, which keeps the piece from flashing through a stale
+        // position on its way to the truth.
+        await resyncRoom().catch(() => {
+          // A failed repair must not mask the original rejection — that is
+          // what the caller needs to see, and the next attempt (or the tab
+          // regaining focus) will try again.
+        });
         // AD-6: the optimistic local mutation is simply abandoned — no
-        // automatic retry that would overwrite server state — and the next
-        // Realtime event for this piece (already in flight regardless)
-        // brings the UI back to the true confirmed state. Nothing else to
-        // do here; the thrown error is what tells TanStack DB to roll the
-        // optimistic change back.
+        // automatic retry that would overwrite server state. The thrown
+        // error is what tells TanStack DB to roll the optimistic change
+        // back, onto the freshly reconciled state.
         throw new Error(result.error.code);
       }
 
@@ -418,6 +524,12 @@ export function createRoomCollections({
   // `pieceCollection`'s `onUpdate` already awaits confirmation through;
   // this collection only exists so components can read a Cluster's anchor
   // reactively once that write lands via Realtime.
+  // Mirrors `writePieceRow` for Clusters, plus the set of ids currently in
+  // the collection — needed because reconciliation has to notice a Cluster
+  // that has *disappeared*, which no read of surviving rows can tell you.
+  let replaceClusters: ((rows: Record<string, unknown>[]) => void) | null = null;
+  let knownClusterIds = new Set(initialClusters.map((c) => c.id));
+
   const clusterCollection = createCollection<RoomDetailCluster, string>({
     id: `clusters-${roomId}`,
     getKey: (cluster) => cluster.id,
@@ -430,12 +542,41 @@ export function createRoomCollections({
         commit();
         markReady();
 
+        replaceClusters = (rows) => {
+          // Clusters are replaced wholesale rather than merged: a Cluster row
+          // is *deleted* when its members lock into the Frame, and a resync
+          // that only wrote the rows it found would leave those ghosts behind
+          // — every member would keep rendering at a stale anchor.
+          const seen = new Set(rows.map((row) => row.id as string));
+          begin();
+          for (const row of rows) {
+            write({
+              type: "update",
+              value: {
+                id: row.id as string,
+                anchorX: row.anchor_x as number,
+                anchorY: row.anchor_y as number,
+                version: row.version as number,
+              },
+            });
+          }
+          for (const existing of knownClusterIds) {
+            if (!seen.has(existing)) {
+              write({ type: "delete", key: existing });
+            }
+          }
+          commit();
+          knownClusterIds = seen;
+        };
+
         ensureChannel();
         clusterHandler = (payload) => {
           if (payload.eventType === "DELETE") {
+            const id = (payload.old as { id: string }).id;
             begin();
-            write({ type: "delete", key: (payload.old as { id: string }).id });
+            write({ type: "delete", key: id });
             commit();
+            knownClusterIds.delete(id);
             return;
           }
           const row = payload.new as Record<string, unknown>;
@@ -451,10 +592,12 @@ export function createRoomCollections({
             value: cluster,
           });
           commit();
+          knownClusterIds.add(cluster.id);
         };
 
         return () => {
           clusterHandler = null;
+          replaceClusters = null;
           releaseChannel();
         };
       },

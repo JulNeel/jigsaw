@@ -87,23 +87,46 @@ export function findContactCandidates(
 }
 
 /**
- * Zero tolerance (AD-3): a set of proposed contacts fuses only if every
- * single one is genuine. One false contact anywhere rejects the whole
- * fusion attempt — never a partial fuse, and never a fusion out of mere
- * proximity with nothing actually touching.
+ * The subset of proposed contacts that are genuine — real true-grid
+ * neighbours, in the right direction, both unrotated. The others are
+ * incidental: `findContactCandidates`' window is 45% of a tile in each
+ * cardinal direction, so a piece dropped into a scattered pile very often
+ * lands roughly one tile from something it has nothing to do with.
+ *
+ * Callers must merge *these* counterparts only, never the full candidate
+ * list — a false contact's piece has no business joining the Îlot.
  */
-export function validateFusion(
+export function genuineContacts(
   contacts: ContactCandidate[],
   trueNeighborsByPieceId: ReadonlyMap<string, ReadonlySet<string>>,
-): boolean {
-  if (contacts.length === 0) {
-    return false;
-  }
-  return contacts.every((contact) => {
+): ContactCandidate[] {
+  return contacts.filter((contact) => {
     const trueNeighborIds = trueNeighborsByPieceId.get(contact.a.pieceId);
     return (
       trueNeighborIds !== undefined &&
       isGenuineContact(contact.a, contact.b, contact.direction, trueNeighborIds)
     );
   });
+}
+
+/**
+ * A drop fuses as soon as *one* contact is genuine (AD-3's real requirement:
+ * never a fusion out of mere proximity with nothing actually touching).
+ *
+ * This used to demand that *every* detected contact be genuine — one false
+ * contact anywhere vetoed the whole attempt. That made fusion asymmetric,
+ * which it must never be: whether an unrelated piece happens to be parked
+ * within the contact window depends entirely on which of the two pieces the
+ * user picks up, so "A onto B" could refuse what "B onto A" accepted, with
+ * the same two pieces ending up in the same place (user report, 2026-09-18 —
+ * see this module's own `fusion symmetry` regression tests). The original
+ * intent — never a *partially false* fuse — is preserved by `genuineContacts`
+ * instead, which is what callers merge on: a false contact no longer vetoes
+ * anything, it simply doesn't bring its own piece along.
+ */
+export function validateFusion(
+  contacts: ContactCandidate[],
+  trueNeighborsByPieceId: ReadonlyMap<string, ReadonlySet<string>>,
+): boolean {
+  return genuineContacts(contacts, trueNeighborsByPieceId).length > 0;
 }
