@@ -155,7 +155,13 @@ describe("predictDropOutcome — placement contagion", () => {
     expect(result.mergedMemberIds).toEqual(expect.arrayContaining(["a1", "a2", "b"]));
   });
 
-  it("stays 'false-contact' when one of several simultaneous contacts is false (zero tolerance)", () => {
+  // Behaviour change (2026-09-18, user report: "une pièce A que je déplace
+  // refuse l'association à une pièce B. Par contre si je déplace la pièce B
+  // vers la pièce A, elles fusionnent"). An incidental contact used to veto
+  // the whole drop, which made fusion depend on which of the two pieces was
+  // picked up. It now only excludes its own piece from the Îlot — that
+  // exclusion is what the `mergedMemberIds` assertion below pins down.
+  it("fuses with the true neighbor and leaves an incidental contact out of the Îlot", () => {
     const a = dragged({ pieceId: "a", gridRow: 0, gridCol: 0, screenX: 0, screenY: 0 });
     const result = predictDropOutcome({
       draggedMembers: [a],
@@ -170,7 +176,9 @@ describe("predictDropOutcome — placement contagion", () => {
       clustersById: noClusters,
       geom,
     });
-    expect(result.outcome).toBe("false-contact");
+    expect(result.outcome).toBe("fused");
+    expect(result.mergedMemberIds).toEqual(expect.arrayContaining(["a", "b"]));
+    expect(result.mergedMemberIds).not.toContain("c");
   });
 
   it("blocks contagion when the target slot is already occupied by an unrelated piece", () => {
@@ -191,7 +199,14 @@ describe("predictDropOutcome — placement contagion", () => {
     expect(result.blockedReason).toBe("occupied");
   });
 
-  it("blocks contagion when it would bury a still-loose piece", () => {
+  // Behaviour change (2026-09-20, user-confirmed): a loose piece resting on
+  // a target slot used to block the placement outright. It no longer does —
+  // the server sweeps it aside instead (`displaceLoosePiecesFromSlots`), so
+  // the invariant it protected (never bury a loose piece under a locked one,
+  // which can never move again) still holds without refusing a drop the
+  // player has every reason to expect to work. Predicting a block here would
+  // now flash a "refused" pulse on a drop the server is about to accept.
+  it("no longer blocks contagion when a loose piece rests on the target slot", () => {
     const bSlot = frameSlotCenter(0, 1, geom);
     const a = dragged({ pieceId: "a", gridRow: 0, gridCol: 0, screenX: bSlot.x - TILE_WIDTH, screenY: bSlot.y });
     const aTargetSlot = frameSlotCenter(0, 0, geom);
@@ -206,8 +221,8 @@ describe("predictDropOutcome — placement contagion", () => {
       clustersById: noClusters,
       geom,
     });
-    expect(result.outcome).toBe("placement-blocked");
-    expect(result.blockedReason).toBe("overlap");
+    expect(result.outcome).toBe("placed");
+    expect(result.placedSlotByPieceId?.get("a")).toEqual({ row: 0, col: 0 });
   });
 
   // The "conflict" outcome (`resolvePlacementAnchor`'s own unit tests in

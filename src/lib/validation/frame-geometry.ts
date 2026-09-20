@@ -1,4 +1,5 @@
-import type { ScreenPoint } from "./validate-overlap";
+/** A point in Canvas world coordinates (the Frame's centre is the origin). */
+export type ScreenPoint = { x: number; y: number };
 
 // The Frame-slot-to-screen-coordinate formula, previously duplicated three
 // times (`placePiece`'s `slotCenters`, `predictFrameLock`'s `slotCenters`,
