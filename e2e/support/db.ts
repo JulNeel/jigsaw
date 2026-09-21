@@ -124,6 +124,45 @@ export async function waitForDbVersionAbove(
   }
 }
 
+export type ClusterRow = { id: string; anchor_x: number; anchor_y: number; version: number };
+
+export async function readClusters(roomId: string): Promise<ClusterRow[]> {
+  const result = await getPool().query<ClusterRow>(
+    `select id, anchor_x, anchor_y, version from cluster where room_id = $1`,
+    [roomId],
+  );
+  return result.rows;
+}
+
+/**
+ * Waits for a Cluster in this room to pass `baseline`.
+ *
+ * The right signal for a plain Îlot reposition, and `waitForDbVersionAbove`
+ * is the wrong one: moving a Cluster writes the `cluster` row's anchor and
+ * bumps exactly one piece row — the *representative* member, which is
+ * whichever member has the lowest id, not the member the player happened to
+ * grab (`room-canvas.tsx`'s `representativeMember`). Waiting on a named
+ * piece's version therefore succeeds or hangs depending on how two random
+ * UUIDs sorted, which is no basis for a test.
+ */
+export async function waitForClusterVersionAbove(
+  roomId: string,
+  baseline: number,
+  timeoutMs = 10_000,
+): Promise<ClusterRow | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const hit = (await readClusters(roomId)).find((c) => c.version > baseline);
+    if (hit) {
+      return hit;
+    }
+    if (Date.now() > deadline) {
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 export async function countClusters(roomId: string): Promise<number> {
   const result = await getPool().query<{ count: string }>(
     `select count(*)::text as count from cluster where room_id = $1`,
