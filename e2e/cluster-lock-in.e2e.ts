@@ -30,11 +30,19 @@ import type { SeededRoom } from "./support/seed";
  * rejection really does leave every member still fused and never stranded at
  * a wrong slot, and that an ordinary reposition is untouched.
  *
- * The fixture is a two-piece Îlot containing the (0,0) corner. An Îlot locks
- * in either by contact with something already placed or via a corner member
- * resting at its own true corner (`findCornerAnchor`), and the corner route
- * needs nothing pre-placed — so the Îlot mechanic is isolated from placement
- * contagion entirely.
+ * Every fixture here is a two-piece Îlot, and whether it contains a corner
+ * is the axis the tests turn on. An Îlot reaches the Frame by exactly two
+ * routes: contact with something already placed, or a corner member resting
+ * at its own true corner (`findCornerAnchor`). The corner route needs
+ * nothing pre-placed, which is what lets these tests exercise the Îlot
+ * mechanic in isolation from placement contagion.
+ *
+ * That asymmetry is the system's central invariant rather than a quirk of
+ * the fixtures: the corner check is the *only* place absolute position is
+ * ever consulted. Everything that later joins an assembly inherits its
+ * position by contact, unchecked — so a cornerless group is never asked
+ * where it is, and cannot place itself however correctly it happens to be
+ * lying. Two tests below pin both halves of that down.
  */
 
 /**
@@ -69,32 +77,64 @@ async function expectRenderedAt(
   ).toBe(true);
 }
 
-/** The seven pieces that are not in the Îlot, parked well clear of everything. */
-const RING: Record<string, { at: { x: number; y: number } }> = {
-  "0,2": { at: { x: 0, y: 300 } },
-  "1,0": { at: { x: -212, y: 212 } },
-  "1,1": { at: { x: -300, y: 0 } },
-  "1,2": { at: { x: -212, y: -212 } },
-  "2,0": { at: { x: 0, y: -300 } },
-  "2,1": { at: { x: 212, y: -212 } },
-  "2,2": { at: { x: 300, y: 0 } },
-};
+/**
+ * Parking spots for the seven pieces that are not in the Îlot.
+ *
+ * A ring at radius 300 around the Frame, which is 3x3 tiles of 100px and so
+ * reaches only ±150. Every point here is at least 150px from any Frame slot
+ * centre and from every drop target these tests use — comfortably outside
+ * the ±45px contact window, so nothing can fuse or make contact by accident.
+ */
+const RING_POSITIONS = [
+  { x: 300, y: 0 },
+  { x: 212, y: 212 },
+  { x: 0, y: 300 },
+  { x: -212, y: 212 },
+  { x: -300, y: 0 },
+  { x: -212, y: -212 },
+  { x: 0, y: -300 },
+  { x: 212, y: -212 },
+];
 
-/** Where the Îlot's anchor member sits before anything is dragged. */
+/** Where the Îlot's left member sits before anything is dragged. */
 const ILOT_HOME = { x: -280, y: 260 };
 
-function ilotFixture() {
+/**
+ * A 3x3 room whose only Îlot is the horizontally-adjacent pair `[left,
+ * right]`, with every other piece parked on the ring.
+ *
+ * Which pair you pick is the whole point of these tests, not a detail: an
+ * Îlot containing a corner can bootstrap a placement on its own, and one
+ * without a corner can only ever place by contact.
+ */
+function ilotFixture(left: string, right: string) {
+  const pieces: Record<string, Record<string, unknown>> = {
+    [left]: { cluster: "ab", clusterOffset: { row: 0, col: 0 } },
+    [right]: { cluster: "ab", clusterOffset: { row: 0, col: 1 } },
+  };
+  let next = 0;
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      const cell = `${row},${col}`;
+      if (cell === left || cell === right) {
+        continue;
+      }
+      pieces[cell] = { at: RING_POSITIONS[next++] };
+    }
+  }
   return {
     gridRows: 3,
     gridCols: 3,
     clusters: { ab: { anchorX: ILOT_HOME.x, anchorY: ILOT_HOME.y } },
-    pieces: {
-      "0,0": { cluster: "ab", clusterOffset: { row: 0, col: 0 } },
-      "0,1": { cluster: "ab", clusterOffset: { row: 0, col: 1 } },
-      ...RING,
-    },
+    pieces,
   };
 }
+
+/** `(0,0)` is a true corner, so this Îlot can anchor itself. */
+const cornerIlot = () => ilotFixture("0,0", "0,1");
+
+/** Neither `(1,1)` (centre) nor `(1,2)` (edge) is a corner. */
+const cornerlessIlot = () => ilotFixture("1,1", "1,2");
 
 test("an Îlot dropped at its own true corner locks every member in", async ({
   page,
@@ -102,7 +142,7 @@ test("an Îlot dropped at its own true corner locks every member in", async ({
   openRoom,
   logCursor,
 }) => {
-  const room = await seed(ilotFixture());
+  const room = await seed(cornerIlot());
   const cornerId = room.pieceId(0, 0);
   const mateId = room.pieceId(0, 1);
 
@@ -130,20 +170,33 @@ test("an Îlot dropped at its own true corner locks every member in", async ({
   expect(await countClusters(room.roomId), "the Cluster row outlived its members").toBe(0);
 });
 
-test("an Îlot dropped on Frame slots that are not its own stays fused at the drop point", async ({
+/**
+ * A corner that anchors at the *wrong* corner would poison a whole quadrant.
+ *
+ * `findCornerAnchor` is deliberately stricter than the rest of the product.
+ * FR-6's general rule is never to check the real picture, and this is the one
+ * documented exception, because a bootstrap anchor is the single point where
+ * absolute position enters the system: everything that later joins the
+ * assembly inherits its position by contact, with no further position check
+ * of any kind. One wrong anchor and contagion propagates the error outwards.
+ *
+ * So the check is not "is this piece near *a* corner slot" but "is it near
+ * *the one slot it truly belongs to*". This drops a corner-bearing Îlot on
+ * the middle of the Frame — a corner piece nowhere near its own corner — and
+ * nothing is placed to make contact with either, so both routes into a lock
+ * are closed.
+ */
+test("a corner Îlot dropped away from its own corner does not anchor", async ({
   page,
   seed,
   openRoom,
   logCursor,
 }) => {
-  const room = await seed(ilotFixture());
+  const room = await seed(cornerIlot());
   const cornerId = room.pieceId(0, 0);
   const mateId = room.pieceId(0, 1);
 
   await openRoom(room);
-  // Slot (1,1) is the Frame's middle. The corner member is a corner piece but
-  // not at *its* corner, and nothing is placed to make contact with, so both
-  // routes into a lock are closed: this must resolve as a plain reposition.
   const target = room.slotWorld(1, 1);
   await dragPieceToWorld(page, cornerId, target);
   // A plain reposition bumps the Cluster row, not necessarily this piece's
@@ -173,12 +226,66 @@ test("an Îlot dropped on Frame slots that are not its own stays fused at the dr
   );
 });
 
+/**
+ * Without a corner, position is never checked at all — not even when right.
+ *
+ * The complement of the test above, and the clearer half of the invariant.
+ * A group with no corner member has exactly one route into the Frame:
+ * contact with something already placed, from which contagion *computes* its
+ * slots. It is never asked "is this your slot", so it cannot get the answer
+ * wrong — and equally, being right earns it nothing.
+ *
+ * Which is what this drops: a cornerless Îlot laid exactly on its own two
+ * true slots, perfectly correct, with nothing placed anywhere in the Frame.
+ * It must stay loose. If it ever locked in here, absolute position would
+ * have leaked into a second place in the system, and `findCornerAnchor`'s
+ * strictness would be protecting nothing.
+ */
+test("a cornerless Îlot lying on its own true slots still does not place", async ({
+  page,
+  seed,
+  openRoom,
+  logCursor,
+}) => {
+  const room = await seed(cornerlessIlot());
+  const centreId = room.pieceId(1, 1);
+  const edgeId = room.pieceId(1, 2);
+
+  await openRoom(room);
+  const target = room.slotWorld(1, 1);
+  await dragPieceToWorld(page, centreId, target);
+  expect(await waitForClusterVersionAbove(room.roomId, 0)).not.toBeNull();
+
+  const centre = await readPiece(centreId);
+  const edge = await readPiece(edgeId);
+  const context = `Server log:\n${logTail(logCursor)}`;
+
+  expect(
+    centre.placed_row,
+    `a cornerless Îlot placed itself with nothing to anchor to — absolute position ` +
+      `is leaking outside findCornerAnchor.\n${context}`,
+  ).toBeNull();
+  expect(edge.placed_row, context).toBeNull();
+  expect(edge.cluster_id).toBe(centre.cluster_id);
+  expect(await countClusters(room.roomId)).toBe(1);
+
+  // Still fused and resting exactly where it was dropped — which happens to
+  // be right on top of its own slots, and that changes nothing.
+  await expectRenderedAt(page, centreId, target, "the cornerless Îlot");
+  await expectRenderedAt(
+    page,
+    edgeId,
+    { x: target.x + 100, y: target.y },
+    "the cornerless Îlot's other member",
+  );
+});
+
 test("an Îlot dropped nowhere near the Frame is an ordinary reposition", async ({
   page,
   seed,
   openRoom,
 }) => {
-  const room = await seed(ilotFixture());
+  const room = await seed(cornerIlot());
   const cornerId = room.pieceId(0, 0);
   const mateId = room.pieceId(0, 1);
 
@@ -250,7 +357,7 @@ test("a client whose Îlot was locked in behind its back is refused and recovers
   browser,
   seed,
 }) => {
-  const room = await seed(ilotFixture());
+  const room = await seed(cornerIlot());
   const cornerId = room.pieceId(0, 0);
   const mateId = room.pieceId(0, 1);
 
