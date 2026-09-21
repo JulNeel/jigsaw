@@ -25,6 +25,7 @@
  */
 
 import { createCollection } from "@tanstack/db";
+import { createResyncScheduler } from "./resync-scheduler";
 import { createClient } from "@/lib/auth/supabase-browser";
 import { movePiece, rotatePiece } from "@/lib/rooms/piece-actions";
 import { fetchRoomState } from "@/lib/rooms/room-state";
@@ -310,13 +311,14 @@ export function createRoomCollections({
   // Realtime event either, so nothing ever repairs the stale version that
   // caused the rejection, and only a page reload recovers. That closed loop
   // is the "une pièce revient systématiquement à sa place" report.
-  let resyncInFlight: Promise<void> | null = null;
-
-  function resyncRoom(): Promise<void> {
-    if (resyncInFlight) {
-      return resyncInFlight;
-    }
-    resyncInFlight = fetchRoomState(roomId)
+  //
+  // Concurrent repairs are collapsed by `createResyncScheduler` rather than
+  // by a plain in-flight check, because every caller here asks *because it
+  // has just found its own view wrong* — so being handed a read whose
+  // snapshot predates that discovery answers the wrong question. See that
+  // module for the timeline.
+  const resyncRoom = createResyncScheduler(() =>
+    fetchRoomState(roomId)
       .then(({ pieces, clusters }) => {
         // Clusters first: a piece whose Cluster row hasn't landed yet is
         // excluded from rendering entirely, so the other order would blink
@@ -330,12 +332,8 @@ export function createRoomCollections({
         // A failed repair is not worth surfacing: every trigger recurs (the
         // next rejected write, the next time the tab is focused), and the
         // caller's own error is the one the user needs to see.
-      })
-      .finally(() => {
-        resyncInFlight = null;
-      });
-    return resyncInFlight;
-  }
+      }),
+  );
 
   const pieceCollection = createCollection<RoomDetailPiece, string>({
     id: `pieces-${roomId}`,
