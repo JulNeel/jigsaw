@@ -25,6 +25,7 @@
  */
 
 import { createCollection } from "@tanstack/db";
+import { createResyncScheduler } from "./resync-scheduler";
 import { createClient } from "@/lib/auth/supabase-browser";
 import { movePiece, rotatePiece } from "@/lib/rooms/piece-actions";
 import { fetchRoomState } from "@/lib/rooms/room-state";
@@ -78,6 +79,16 @@ export function createRoomCollections({
   // costs nothing and avoids any assumption about that.
   const pendingByPieceId = new Map<string, PendingVersionWait[]>();
 
+  // The highest version this client has seen *confirmed* for each piece.
+  //
+  // Not derivable from the collection: while a mutation is pending, TanStack
+  // DB overlays the optimistic value, and that value carries the version the
+  // row had *before* the write. Reading `version` back from the collection
+  // during a pending mutation therefore reports the pre-move number even
+  // though the synced row has already advanced — which is exactly the state
+  // `awaitVersion` has to be able to interrogate.
+  const confirmedVersionByPieceId = new Map<string, number>();
+
   // The version this *same client's own* most recent successful move/place
   // actually produced, keyed by piece id — read from the Server Action's
   // own synchronous return value, never waiting for that write's Realtime
@@ -121,6 +132,10 @@ export function createRoomCollections({
   let hasFiredCompletion = false;
 
   function resolvePending(pieceId: string, version: number) {
+    const known = confirmedVersionByPieceId.get(pieceId) ?? -1;
+    if (version > known) {
+      confirmedVersionByPieceId.set(pieceId, version);
+    }
     const pending = pendingByPieceId.get(pieceId);
     if (!pending) {
       return;
@@ -140,6 +155,25 @@ export function createRoomCollections({
   }
 
   function awaitVersion(pieceId: string, version: number): Promise<void> {
+    // Level-triggered, not edge-triggered. The confirmation this is about to
+    // wait for may already have arrived: the Realtime event is pushed
+    // straight out of Postgres on an open socket, while the Server Action's
+    // response — whose `result.version` is what names the target here — has
+    // to travel back from the app server. Deployed, those two paths are
+    // comparable and the event frequently wins; on `next dev` over loopback
+    // it essentially never does, which is why this only ever showed up away
+    // from a local machine (`e2e/response-after-event.e2e.ts`).
+    //
+    // Subscribing to an event already consumed used to mean waiting the full
+    // AWAIT_VERSION_TIMEOUT_MS for nothing, and — far worse than a stalled
+    // promise — the mutation stayed pending, so the collection kept serving
+    // the optimistic row and its *pre-move* version. The next drag then sent
+    // that stale `expectedVersion`, was rejected as STALE_WRITE, and the
+    // piece snapped back.
+    const confirmed = confirmedVersionByPieceId.get(pieceId);
+    if (confirmed != null && confirmed >= version) {
+      return Promise.resolve();
+    }
     return new Promise((resolve, reject) => {
       // `entry` declared first so `timeoutId`'s callback below references
       // an already-fully-defined value, not a forward reference to a
@@ -277,13 +311,14 @@ export function createRoomCollections({
   // Realtime event either, so nothing ever repairs the stale version that
   // caused the rejection, and only a page reload recovers. That closed loop
   // is the "une pièce revient systématiquement à sa place" report.
-  let resyncInFlight: Promise<void> | null = null;
-
-  function resyncRoom(): Promise<void> {
-    if (resyncInFlight) {
-      return resyncInFlight;
-    }
-    resyncInFlight = fetchRoomState(roomId)
+  //
+  // Concurrent repairs are collapsed by `createResyncScheduler` rather than
+  // by a plain in-flight check, because every caller here asks *because it
+  // has just found its own view wrong* — so being handed a read whose
+  // snapshot predates that discovery answers the wrong question. See that
+  // module for the timeline.
+  const resyncRoom = createResyncScheduler(() =>
+    fetchRoomState(roomId)
       .then(({ pieces, clusters }) => {
         // Clusters first: a piece whose Cluster row hasn't landed yet is
         // excluded from rendering entirely, so the other order would blink
@@ -297,12 +332,8 @@ export function createRoomCollections({
         // A failed repair is not worth surfacing: every trigger recurs (the
         // next rejected write, the next time the tab is focused), and the
         // caller's own error is the one the user needs to see.
-      })
-      .finally(() => {
-        resyncInFlight = null;
-      });
-    return resyncInFlight;
-  }
+      }),
+  );
 
   const pieceCollection = createCollection<RoomDetailPiece, string>({
     id: `pieces-${roomId}`,
