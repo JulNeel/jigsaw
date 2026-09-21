@@ -1,5 +1,5 @@
 # generated: 2026-08-08
-# last_updated: 2026-08-08
+# last_updated: 2026-09-21
 # project: jigsaw
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-08-08
-last_updated: 2026-09-05
+last_updated: 2026-09-21
 project: jigsaw
 project_key: NOKEY
 tracking_system: file-system
@@ -62,7 +62,7 @@ development_status:
   2-4-create-the-room-and-get-a-shareable-invite-link: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   3-1-join-a-room-as-a-guest: done
   3-2-first-access-tutorial: done
   3-3-navigate-the-infinite-canvas: done
@@ -81,7 +81,7 @@ development_status:
   3-16-highlight-the-frame-pieces: done
   3-17-update-the-first-access-tutorial-for-the-new-canvas-features: done
   3-18-split-single-finger-vs-two-finger-navigation-on-mobile: done
-  3-19-optimistic-ilot-lock-in: review
+  3-19-optimistic-ilot-lock-in: done
   epic-3-retrospective: optional
 
   epic-4: backlog
