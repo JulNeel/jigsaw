@@ -28,6 +28,23 @@ type Fixtures = {
   clientErrors: string[];
   /** Opens a seeded room with the first-run tutorial pre-dismissed. */
   openRoom: (room: SeededRoom) => Promise<void>;
+  /**
+   * Makes every Server Action *response* reach the page late, so a test can
+   * assert on what the client predicted before it could possibly have been
+   * told anything.
+   *
+   * Only the response is held. The request reaches the server untouched, the
+   * transaction commits, Postgres emits and Realtime delivers — so this
+   * reproduces the ordering a deployed app gets, and nothing about the
+   * server's own behaviour is simulated.
+   *
+   * A fixture rather than a helper because the hold has to be released
+   * before the page is torn down: a route handler still sleeping when the
+   * test body returns fails with "route.fetch: Test ended", which aborts the
+   * whole run and leaves later tests unexecuted. Teardown releases every
+   * pending hold and waits for it to drain.
+   */
+  holdServerActionResponses: (delayMs: number) => Promise<void>;
 };
 
 export const test = base.extend<Fixtures>({
@@ -83,6 +100,39 @@ export const test = base.extend<Fixtures>({
       await page.goto(room.path);
       await waitForCanvasReady(page);
     });
+  },
+
+  holdServerActionResponses: async ({ page }, use) => {
+    let released = false;
+    let inFlight = 0;
+
+    await use(async (delayMs: number) => {
+      await page.route("**/room/**", async (route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        inFlight++;
+        try {
+          const response = await route.fetch();
+          const until = Date.now() + delayMs;
+          // Polled rather than one long sleep, so teardown can cut it short
+          // instead of waiting out a hold nobody is watching any more.
+          while (!released && Date.now() < until) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          await route.fulfill({ response });
+        } finally {
+          inFlight--;
+        }
+      });
+    });
+
+    released = true;
+    const drainBy = Date.now() + 5_000;
+    while (inFlight > 0 && Date.now() < drainBy) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   },
 });
 
