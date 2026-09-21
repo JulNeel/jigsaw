@@ -6,10 +6,9 @@ import { ERROR_CODES, type ErrorCode } from "@/lib/errors";
 import {
   CONTACT_TOLERANCE_FACTOR,
   findContactCandidates,
-  validateFusion,
+  genuineContacts,
   type ScreenPositioned,
 } from "@/lib/validation/validate-fusion";
-import { overlapsAnyFreePiece } from "@/lib/validation/validate-overlap";
 import { findCornerAnchor, type AnchorCandidateMember } from "@/lib/validation/validate-corner-anchor";
 import {
   computeContagionTargets,
@@ -58,6 +57,42 @@ const POSTGRES_UNIQUE_VIOLATION = "23505";
 // shared canonical lock order across both call sites — deferred, tracked
 // in `deferred-work.md`.
 const POSTGRES_DEADLOCK_DETECTED = "40P01";
+
+// Why a write was refused, and why a drop that touched something didn't fuse.
+//
+// Added as throwaway diagnostics while chasing three reports that all looked
+// identical from the outside, and kept because they turned out to be the only
+// place those distinctions exist at all: a rejection's *code* is what
+// separates "the client let a locked piece be dragged" from "the client's
+// cached version fell behind", and the two demand opposite fixes. The e2e
+// suite now asserts on these lines — `assertNoLogLine` on the happy paths is
+// what stops a test passing while the server quietly rejects everything.
+//
+// Dev only: a production build never evaluates either branch.
+const TRACE = process.env.NODE_ENV !== "production";
+
+function traceRejection(
+  code: string,
+  input: { pieceId: string; expectedVersion: number },
+  loaded: { version: number; placedRow: number | null },
+) {
+  if (TRACE) {
+    console.warn(
+      `[move-reject] ${code} piece=${input.pieceId} clientExpected=${input.expectedVersion} ` +
+        `serverVersion=${loaded.version} serverPlacedRow=${loaded.placedRow}`,
+    );
+  }
+}
+
+// Why a drop that *did* have contact candidates ended up not fusing. Every
+// reason is a distinct branch of `repositionFuseOrPlace`, and from the
+// outside they are indistinguishable — the piece simply rests where it was
+// dropped, exactly as it would after an ordinary move.
+function traceNoFusion(reason: string, pieceId: string, detail: Record<string, unknown>) {
+  if (TRACE) {
+    console.warn(`[no-fusion] ${reason} piece=${pieceId}`, detail);
+  }
+}
 
 function mapUnexpectedError(err: unknown): ErrorCode {
   const code =
@@ -344,55 +379,6 @@ type MergedMember = {
   screenY: number;
 };
 
-// How far beyond a target slot's own footprint the overlap guard widens its
-// unlocked first-pass scan before row-locking whatever it finds there —
-// deliberately more generous than the exact overlap test itself (which uses
-// a plain `tileWidth`/`tileHeight` margin), so a piece that's merely close
-// (not yet exactly overlapping) but could complete its own concurrent move
-// into a target slot before this transaction commits still gets locked and
-// re-checked rather than slipping through. Reasonable default, not
-// spec-mandated — tune if manual testing shows it too tight or loose.
-const NEARBY_LOCK_MARGIN_FACTOR = 2;
-
-/**
- * Whether locking every member in `targets` into its slot would bury a
- * still-loose piece resting nearby — a locked piece never moves again, so
- * one buried at lock time would become permanently unreachable. Two passes
- * (unlocked scan, then row-lock-and-recheck just the candidates that scan
- * found) to close the same race window `repositionFuseOrPlace`'s own
- * contact re-check closes, without locking every free piece in the Room.
- * `excludePieceIds` must be every id in the merged group being placed — a
- * piece that's itself about to join the group must never trip this guard
- * against its own future slot.
- */
-async function wouldBuryLoosePiece(
-  client: PoolClient,
-  roomId: string,
-  geom: FrameGeometry,
-  targets: ReadonlyMap<string, { row: number; col: number }>,
-  excludePieceIds: readonly string[],
-): Promise<boolean> {
-  const slotCenters = [...targets.values()].map((t) => frameSlotCenter(t.row, t.col, geom));
-  const initialFreeCandidates = (
-    await loadStationaryCandidates(client, roomId, [...excludePieceIds], geom)
-  ).filter((p) => p.placedRow == null);
-  const nearbyPieceIds = initialFreeCandidates
-    .filter((p) =>
-      slotCenters.some(
-        (slot) =>
-          Math.abs(p.screenX - slot.x) < geom.tileWidth * NEARBY_LOCK_MARGIN_FACTOR &&
-          Math.abs(p.screenY - slot.y) < geom.tileHeight * NEARBY_LOCK_MARGIN_FACTOR,
-      ),
-    )
-    .map((p) => p.pieceId);
-  const lockedFreeCandidates = (await loadAndLockPiecesByIds(client, nearbyPieceIds, geom))
-    .filter((p) => p.placedRow == null)
-    .map((p) => ({ x: p.screenX, y: p.screenY }));
-  return slotCenters.some((slotCenter) =>
-    overlapsAnyFreePiece(slotCenter, lockedFreeCandidates, geom.tileWidth, geom.tileHeight),
-  );
-}
-
 /**
  * Writes every non-anchor member's `placed_row`/`placed_col` (an anchor is
  * a member whose current `placedRow`/`placedCol` already equals its own
@@ -520,8 +506,26 @@ async function repositionFuseOrPlace(
       client,
       group.members.map((m) => m.pieceId),
     );
-    const genuine = validateFusion(candidates, trueNeighborsByPieceId);
-    if (genuine) {
+    // Only the genuine contacts' own pieces are ever merged — an incidental
+    // near-contact (the 45%-of-a-tile window catches plenty in a scattered
+    // pile) no longer vetoes the fusion, so it must not be allowed to ride
+    // along into the Îlot either. See `genuineContacts`' own comment.
+    const genuine = genuineContacts(candidates, trueNeighborsByPieceId);
+    if (genuine.length === 0) {
+      traceNoFusion("no-genuine-contact", group.draggedMember.pieceId, {
+        candidates: candidates.map((c) => ({
+          a: c.a.pieceId,
+          aGrid: [c.a.gridRow, c.a.gridCol],
+          aRot: c.a.rotation,
+          b: c.b.pieceId,
+          bGrid: [c.b.gridRow, c.b.gridCol],
+          bRot: c.b.rotation,
+          direction: c.direction,
+          bIsTrueNeighbor: trueNeighborsByPieceId.get(c.a.pieceId)?.has(c.b.pieceId) ?? false,
+        })),
+      });
+    }
+    if (genuine.length > 0) {
       // Re-verify contact with the now-locked, guaranteed-fresh position —
       // `candidates` above came from an unlocked read, so a concurrent
       // write could have relocated a touched piece in the window between
@@ -530,11 +534,11 @@ async function repositionFuseOrPlace(
       const touchedResult = await client.query(
         `select id, cluster_id, grid_row, grid_col, rotation, shape_type, placed_row, placed_col
          from piece where id = any($1::uuid[]) for update`,
-        [candidates.map((c) => c.b.pieceId)],
+        [genuine.map((c) => c.b.pieceId)],
       );
       const freshTouched = await loadAndLockPiecesByIds(
         client,
-        candidates.map((c) => c.b.pieceId),
+        genuine.map((c) => c.b.pieceId),
         geom,
       );
       const freshCandidates = findContactCandidates(
@@ -544,13 +548,24 @@ async function repositionFuseOrPlace(
         group.tileHeight,
         tolerance,
       );
-      const stillGenuine =
-        freshCandidates.length > 0 && validateFusion(freshCandidates, trueNeighborsByPieceId);
-      if (stillGenuine) {
+      // Re-derived from the fresh geometry rather than reusing `genuine`:
+      // a counterpart that a concurrent write moved out of contact in the
+      // meantime must drop out of the merge individually, not drag the
+      // whole (still otherwise valid) fusion down with it — and equally
+      // must not be merged on the strength of its own now-stale contact.
+      const stillGenuine = genuineContacts(freshCandidates, trueNeighborsByPieceId);
+      const stillTouchedIds = new Set(stillGenuine.map((c) => c.b.pieceId));
+      if (stillTouchedIds.size === 0) {
+        traceNoFusion("contact-lost-under-lock", group.draggedMember.pieceId, {
+          genuineBeforeLock: genuine.length,
+          freshCandidates: freshCandidates.length,
+        });
+      }
+      if (stillTouchedIds.size > 0) {
         genuinelyFused = true;
         const freshTouchedById = new Map(freshTouched.map((s) => [s.pieceId, s]));
         const extraMembers: MergedMember[] = [];
-        for (const row of touchedResult.rows) {
+        for (const row of touchedResult.rows.filter((r) => stillTouchedIds.has(r.id))) {
           if (row.cluster_id) {
             touchedClusterIds.add(row.cluster_id);
           } else {
@@ -622,20 +637,36 @@ async function repositionFuseOrPlace(
   // touching, or a write that can't land), so the only safe outcome is to
   // abort the whole drop, never a partial/downgraded fusion.
   if (anchorResolution.kind === "conflict") {
+    traceNoFusion("anchor-conflict", group.draggedMember.pieceId, { genuinelyFused });
     return { version: await repositionPlain(client, group, x, y), fused: false, placed: false };
   }
   if (anchorResolution.kind === "anchored") {
     const targetsResult = computeContagionTargets(anchorResolution.anchor, mergedMembers, geom);
     if (targetsResult.valid) {
-      const nonAnchorTargets = [...targetsResult.targets].filter(
-        ([, target]) =>
-          !mergedMembers.some(
-            (m) =>
-              m.placedRow === target.row && m.placedCol === target.col && m.placedRow != null,
-          ),
+      // The slots this write will actually newly occupy. A member already
+      // sitting on its own target is an anchor: `writeContagionPlacement`
+      // skips it entirely, so its slot is not something this write claims.
+      //
+      // Both guards below must ask about *these* slots and no others. The
+      // burial check used to receive the full target set instead (fixed
+      // 2026-09-20, reproduced by `e2e/fusion-next-to-placed.e2e.ts`): a
+      // loose piece resting anywhere on the already-assembled region then
+      // counted as "about to be buried" by a slot that was already occupied
+      // before the drop, and vetoed the whole contagion. In play that reads
+      // as a piece refusing to join a group it is genuinely touching, for no
+      // visible reason, until the unrelated loose piece is moved away —
+      // "parfois une pièce refuse de fusionner avec 2 pièces validées".
+      const nonAnchorTargets = new Map(
+        [...targetsResult.targets].filter(
+          ([, target]) =>
+            !mergedMembers.some(
+              (m) =>
+                m.placedRow === target.row && m.placedCol === target.col && m.placedRow != null,
+            ),
+        ),
       );
       const slotResult =
-        nonAnchorTargets.length === 0
+        nonAnchorTargets.size === 0
           ? { rows: [] }
           : await client.query(
               `select 1 from piece
@@ -644,15 +675,12 @@ async function repositionFuseOrPlace(
                ) and id <> all($4::uuid[])`,
               [
                 group.roomId,
-                nonAnchorTargets.map(([, t]) => t.row),
-                nonAnchorTargets.map(([, t]) => t.col),
+                [...nonAnchorTargets.values()].map((t) => t.row),
+                [...nonAnchorTargets.values()].map((t) => t.col),
                 mergedPieceIds,
               ],
             );
-      const buried =
-        slotResult.rows.length === 0 &&
-        (await wouldBuryLoosePiece(client, group.roomId, geom, targetsResult.targets, mergedPieceIds));
-      if (slotResult.rows.length === 0 && !buried) {
+      if (slotResult.rows.length === 0) {
         const version = await writeContagionPlacement(
           client,
           targetsResult.targets,
@@ -662,6 +690,12 @@ async function repositionFuseOrPlace(
         );
         return { version, fused: genuinelyFused, placed: true };
       }
+      traceNoFusion("contagion-blocked", group.draggedMember.pieceId, {
+        genuinelyFused,
+        occupiedSlots: slotResult.rows.length,
+      });
+    } else {
+      traceNoFusion("contagion-targets-invalid", group.draggedMember.pieceId, { genuinelyFused });
     }
     // Contagion didn't validate — abort entirely, per the rule above.
     return { version: await repositionPlain(client, group, x, y), fused: false, placed: false };
@@ -692,10 +726,7 @@ async function repositionFuseOrPlace(
           mergedPieceIds,
         ],
       );
-      const buried =
-        slotResult.rows.length === 0 &&
-        (await wouldBuryLoosePiece(client, group.roomId, geom, targetsResult.targets, mergedPieceIds));
-      if (slotResult.rows.length === 0 && !buried) {
+      if (slotResult.rows.length === 0) {
         const version = await writeContagionPlacement(
           client,
           targetsResult.targets,
@@ -806,10 +837,12 @@ export async function movePiece(input: {
     }
     if (loaded.version !== input.expectedVersion) {
       await client.query("ROLLBACK");
+      traceRejection("STALE_WRITE", input, loaded);
       return { success: false, error: { code: ERROR_CODES.STALE_WRITE } };
     }
     if (loaded.placedRow !== null) {
       await client.query("ROLLBACK");
+      traceRejection("ALREADY_PLACED", input, loaded);
       return { success: false, error: { code: ERROR_CODES.ALREADY_PLACED } };
     }
 

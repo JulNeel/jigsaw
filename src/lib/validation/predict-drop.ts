@@ -1,14 +1,13 @@
 import {
   CONTACT_TOLERANCE_FACTOR,
   findContactCandidates,
-  validateFusion,
+  genuineContacts,
   type ContactCandidate,
 } from "./validate-fusion";
 import { computeTrueNeighborIds } from "./true-neighbors";
 import { frameSlotCenter, type FrameGeometry } from "./frame-geometry";
 import { findCornerAnchor } from "./validate-corner-anchor";
 import { computeContagionTargets, resolvePlacementAnchor, type ContagionMember } from "./validate-contagion";
-import { overlapsAnyFreePiece } from "./validate-overlap";
 import type { PieceShapeType } from "@/lib/piece-cutting/classify-piece-shape";
 
 // Client-side mirror of `piece-actions.ts`'s `repositionFuseOrPlace` — same
@@ -91,15 +90,17 @@ function stationaryScreenPosition(
 // its own true corner.
 // `"placement-blocked"` — an anchor was found (a real already-placed
 // neighbor, or a corner) but the actual write can't land (conflicting
-// anchors, out of bounds, the exact slot is already occupied, or it would
-// bury a loose piece).
+// anchors, out of bounds, or the exact slot is already taken by another
+// *locked* piece). A merely loose piece lying on the slot is no longer a
+// reason: locked pieces render beneath everything still in play, so nothing
+// can be buried by a placement.
 export type PredictedDropOutcome = "none" | "false-contact" | "fused" | "placed" | "placement-blocked";
 
 export type PredictedDrop = {
   outcome: PredictedDropOutcome;
   candidates: readonly ContactCandidate[];
   placedSlotByPieceId?: ReadonlyMap<string, { row: number; col: number }>;
-  blockedReason?: "conflict" | "bounds" | "occupied" | "overlap";
+  blockedReason?: "conflict" | "bounds" | "occupied";
   mergedMemberIds?: readonly string[];
 };
 
@@ -151,11 +152,13 @@ export function predictDropOutcome(params: {
     const trueNeighborsByPieceId = new Map(
       draggedMembers.map((m) => [m.pieceId, computeTrueNeighborIds(m.pieceId, pieces)]),
     );
-    const genuine = validateFusion(candidates, trueNeighborsByPieceId);
-    if (genuine) {
+    // Mirrors `repositionFuseOrPlace` exactly (AD-2): an incidental contact
+    // neither vetoes the fusion nor joins the Îlot — only genuine ones do.
+    const genuine = genuineContacts(candidates, trueNeighborsByPieceId);
+    if (genuine.length > 0) {
       genuinelyFused = true;
       const stationaryById = new Map(stationary.map((s) => [s.pieceId, s]));
-      const touchedIds = new Set(candidates.map((c) => c.b.pieceId));
+      const touchedIds = new Set(genuine.map((c) => c.b.pieceId));
       const addedClusterIds = new Set<string>();
       const extra: MergedMember[] = [];
       for (const touchedId of touchedIds) {
@@ -203,12 +206,20 @@ export function predictDropOutcome(params: {
 
   function checkPlacement(anchor: { rowDelta: number; colDelta: number }):
     | { ok: true; targets: ReadonlyMap<string, { row: number; col: number }> }
-    | { ok: false; reason: "bounds" | "occupied" | "overlap" } {
+    | { ok: false; reason: "bounds" | "occupied" } {
     const targetsResult = computeContagionTargets(anchor, mergedMembers, geom);
     if (!targetsResult.valid) {
       return { ok: false, reason: "bounds" };
     }
-    const targetList = [...targetsResult.targets.values()];
+    // Only the slots this drop would newly claim. A member already sitting
+    // on its own target is an anchor and its slot is not up for grabs —
+    // mirrors `repositionFuseOrPlace`'s `nonAnchorTargets` exactly (AD-2).
+    const targetList = [...targetsResult.targets.values()].filter(
+      (target) =>
+        !mergedMembers.some(
+          (m) => m.placedRow === target.row && m.placedCol === target.col && m.placedRow != null,
+        ),
+    );
     const occupied = pieces.some(
       (p) =>
         !mergedIds.has(p.id) &&
@@ -218,15 +229,11 @@ export function predictDropOutcome(params: {
     if (occupied) {
       return { ok: false, reason: "occupied" };
     }
-    const freeCandidates = pieces
-      .filter((p) => !mergedIds.has(p.id) && p.placedRow == null)
-      .map((p) => stationaryScreenPosition(p, clustersById, geom));
-    const buried = targetList.some((t) =>
-      overlapsAnyFreePiece(frameSlotCenter(t.row, t.col, geom), freeCandidates, tileWidth, tileHeight),
-    );
-    if (buried) {
-      return { ok: false, reason: "overlap" };
-    }
+    // A loose piece resting on a claimed slot used to block the placement
+    // here too, mirroring a server-side rule that no longer exists: locked
+    // pieces now render beneath everything in play, so nothing can end up
+    // buried and there is nothing left to refuse. See `renderItems` in
+    // `room-canvas.tsx`.
     return { ok: true, targets: targetsResult.targets };
   }
 

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getSupabaseEnv } from "@/lib/auth/env";
+import { withSimulatedLatency } from "@/lib/dev/simulated-latency-fetch";
 
 /**
  * Supabase client for Server Components, Server Actions, and Route Handlers.
@@ -34,6 +35,7 @@ export async function createClient() {
           }
         },
       },
+      global: { fetch: withSimulatedLatency() },
     },
   );
 }

@@ -51,12 +51,7 @@ export async function RoomList({ userId }: { userId: string }) {
     // has no Rooms when the real problem is that they couldn't be loaded.
     console.error("getRoomsForUser failed:", err);
     return (
-      <div className="flex flex-col items-center gap-3 py-16 text-center">
-        <h2 className="text-lg font-semibold">{tHome("loadErrorTitle")}</h2>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          {tHome("loadErrorBody")}
-        </p>
-      </div>
+      <EmptyState glyph={null} title={tHome("loadErrorTitle")} body={tHome("loadErrorBody")} />
     );
   }
 

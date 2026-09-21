@@ -82,57 +82,93 @@
 }
 
 :root {
-  /* DESIGN.md brand-layer tokens. WCAG 2.2 AA hand-verified (computed contrast
-     ratios) for: foreground/background, primary/primary-foreground,
-     muted-foreground (on background and muted), ring, and brand-accent (see
-     DESIGN.md Colors). The untouched shadcn defaults below (secondary, input,
-     chart-*, sidebar-*, and the whole .dark block) are NOT part of that
-     verification — they carry shadcn's own presumed-AA neutral defaults, unreviewed.
-     Design system v2 (2026-09, Claude Design canvas): primary/brand-accent/
-     destructive replaced (terracotta → deep green, gold → raspberry), plus
-     new -hover/-subtle variants and per-player identity colors added below —
-     everything else in this block is unchanged from v1. */
-  --background: #fbf7f1;
-  --foreground: #2b2621;
-  --card: #fffdf9;
-  --card-foreground: #2b2621;
-  --popover: #fffdf9;
-  --popover-foreground: #2b2621;
-  --primary: #1d5b3a;
+  /* Jigsaw colour system — Tangerine & Grape. Vif et chaleureux : primaire
+     Tangerine, accent vivant Grape, fond ivoire clair partout (page et
+     canevas). Source : design_handoff_jigsaw_design_system/tokens/colors.css
+     et tokens/players.css. */
+  --ivory-50: #fffefb;
+  --ivory-100: #fffbf2; /* la page */
+  --ivory-200: #fff2de; /* la ligne sélectionnée */
+  --sand-300: #ffe3be; /* bordures */
+  --sand-400: #ffc066; /* bordure forte */
+  --clay-600: #8c7452; /* texte secondaire */
+  --ink: #3a2a12;
+  --ink-soft: #6b573a;
+
+  --tangerine-500: #ff8a1e;
+  --tangerine-600: #e87710;
+  --tangerine-subtle: #fff0dc;
+
+  --grape-500: #8b5cf6; /* pastilles, halos */
+  --grape-700: #6d3fd1; /* la valeur TEXTE — 5,3:1 sur une carte blanche */
+  --grape-subtle: #f1eaff;
+
+  --background: var(--ivory-100);
+  --foreground: var(--ink);
+  --card: var(--ivory-50);
+  --card-foreground: var(--ink);
+  --popover: var(--ivory-50);
+  --popover-foreground: var(--ink);
+  --muted: var(--ivory-200);
+  --muted-foreground: var(--clay-600);
+  --border: var(--sand-300);
+  --border-strong: var(--sand-400);
+  --input: var(--sand-300);
+
+  /* shadcn's own generic secondary/accent slots — not part of the handoff's
+     colors.css (it only defines the app's own semantic tokens), but
+     `secondary` is actively used by Button's `secondary` variant. Aligned to
+     the same fill/text pair `muted` already uses, matching how the previous
+     theme resolved this gap. */
+  --secondary: var(--ivory-200);
+  --secondary-foreground: var(--ink);
+  --accent: var(--ivory-200);
+  --accent-foreground: var(--ink);
+
+  --primary: var(--tangerine-500);
+  --primary-hover: var(--tangerine-600);
   --primary-foreground: #ffffff;
-  --primary-hover: #123a25;
-  --primary-subtle: #e9f1ec;
-  --primary-subtle-foreground: #123a25;
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: #efe6d8;
-  --muted-foreground: #6e6153;
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  /* Live-presence / completion only — never chrome, never decoration
-     (DESIGN.md). */
-  --brand-accent: #c42a5c;
-  --brand-accent-hover: #a31f4a;
+  --primary-subtle: var(--tangerine-subtle);
+  --primary-subtle-foreground: var(--tangerine-600);
+
+  --success: #2fb67c;
+
+  --brand-accent: var(--grape-700);
+  --brand-accent-hover: #5a34ad;
+  --brand-accent-fill: var(--grape-500);
   --brand-accent-foreground: #ffffff;
-  --brand-accent-subtle: #fbeaf0;
-  --destructive: #b3261e;
+  --brand-accent-subtle: var(--grape-subtle);
+
+  --ring: var(--grape-700);
+  --destructive: #d1453a;
   --destructive-foreground: #ffffff;
-  --destructive-subtle: #fbeceb;
-  --border: #e3d6c2;
-  --border-strong: #a79885;
-  --input: oklch(0.922 0 0);
-  --ring: #1d5b3a;
-  /* Participant identity colours (Epic 4, not built yet) — one per person in
-     a Salon, six hues at matched lightness/chroma so no player reads as more
-     important than another; all clear 4.5:1 on --background and take white
-     text at 4.5:1+. Added now (unused) since they're part of the same
-     canvas's token set and cost nothing to have ready. */
-  --player-1: #c4572b;
-  --player-2: #2f7a57;
-  --player-3: #2b6fa8;
-  --player-4: #b03a6b;
-  --player-5: #7a5fb0;
-  --player-6: #8a6c18;
+  --destructive-subtle: #fbe6e2;
+
+  /* Text aliases */
+  --text-body: var(--ink);
+  --text-secondary: var(--clay-600);
+  --text-on-primary: #ffffff;
+
+  /* Surface aliases */
+  --surface-page: var(--ivory-100);
+  --surface-card: var(--ivory-50);
+  --surface-sunken: var(--ivory-200);
+  --surface-selected: var(--ivory-200);
+
+  --surface-canvas: #fdf4e4;
+  --canvas-foreground: var(--ink);
+  --canvas-foreground-soft: var(--ink-soft);
+  --frame-outline: var(--tangerine-500);
+  --piece-halo: color-mix(in oklch, var(--grape-500) 40%, transparent);
+
+  /* Couleurs de Participant — vives, assorties à la palette, encre blanche
+     dessus. */
+  --player-1: #ff8a1e;
+  --player-2: #8b5cf6;
+  --player-3: #2fb67c;
+  --player-4: #e0507a;
+  --player-5: #3b7fc4;
+  --player-6: #d1a300;
   --player-foreground: #ffffff;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);

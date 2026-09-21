@@ -19,6 +19,7 @@ import { createRoomCollections } from "@/lib/db/collections";
 import { markPredictedLock, subscribePlacementConflict } from "@/lib/rooms/placement-conflict-events";
 import { subscribeMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
+  isPredictedFusionConfirmed,
   markPredictedFusion,
   subscribeFusionConflict,
 } from "@/lib/rooms/predicted-fusion-events";
@@ -38,6 +39,7 @@ import {
 import { triggerPlacementHaptic } from "@/lib/audio/haptics";
 import { predictDropOutcome } from "@/lib/validation/predict-drop";
 import { frameSlotCenter, type FrameGeometry } from "@/lib/validation/frame-geometry";
+import { useStageTestHook } from "@/lib/dev/stage-test-hook";
 import { subscribeFrameComplete } from "@/lib/rooms/frame-completion-events";
 import { computePieceEdgeShapes } from "@/lib/piece-cutting/compute-piece-edge-shapes";
 import { buildPieceOutlinePath, drawPieceOutlinePath } from "@/lib/piece-cutting/build-piece-outline-path";
@@ -60,7 +62,6 @@ import {
 // pass rather than silently treated as an extension of it.
 const PLACEMENT_PULSE_LOCKED_COLOR = "#2E7D32";
 const PLACEMENT_PULSE_REJECTED_COLOR = "#C62828";
-const PLACEMENT_PULSE_OVERLAP_COLOR = "#EF6C00";
 const PLACEMENT_PULSE_DURATION_SECONDS = 0.32;
 
 // Gold `accent` (DESIGN.md) — reserved specifically for presence/completion
@@ -553,7 +554,7 @@ function SoloPieceSprite({
     } else if (prediction.outcome === "placement-blocked") {
       onInstantFrameLockOutcome(
         piece.id,
-        prediction.blockedReason === "overlap" ? PLACEMENT_PULSE_OVERLAP_COLOR : PLACEMENT_PULSE_REJECTED_COLOR,
+        PLACEMENT_PULSE_REJECTED_COLOR,
         dropPoint,
       );
     }
@@ -753,7 +754,24 @@ function ClusterGroupSprite({
       ? optimisticAnchor
       : { x: cluster.anchorX, y: cluster.anchorY };
 
+  // Defense in depth (2026-09-18). A *real* Cluster can never hold a placed
+  // piece — the server clears `cluster_id` on every member the moment the
+  // group locks into the Frame — so this component never needed the
+  // placed-guard `SoloPieceSprite` has always had. Story 3.13's *synthetic*
+  // predicted-fusion Îlot broke that invariant: it groups pieces by a local
+  // prediction, and a prediction that resolved as a placement rather than a
+  // fusion could sweep genuinely-locked pieces into a draggable Group. Every
+  // drag then dispatched `movePiece` on a placed piece, came back
+  // `ALREADY_PLACED`, and rolled straight back — the piece returning to its
+  // slot on every attempt until the page was reloaded. `isPredictedFusionConfirmed`
+  // fixes that at the source; this makes the invariant impossible to violate
+  // silently again, whatever a future prediction does.
+  const hasPlacedMember = members.some((m) => m.placedRow != null);
+
   function handleDragEnd(e: Konva.KonvaEventObject<DragEvent>) {
+    if (hasPlacedMember) {
+      return;
+    }
     onDragEnd(e);
     const groupAnchor = { x: e.target.x(), y: e.target.y() };
     // The representative member's own actual screen position — not the
@@ -883,7 +901,7 @@ function ClusterGroupSprite({
     } else if (prediction.outcome === "placement-blocked") {
       onInstantFrameLockOutcome(
         representativeMember.id,
-        prediction.blockedReason === "overlap" ? PLACEMENT_PULSE_OVERLAP_COLOR : PLACEMENT_PULSE_REJECTED_COLOR,
+        PLACEMENT_PULSE_REJECTED_COLOR,
         dropPoint,
       );
     }
@@ -903,6 +921,11 @@ function ClusterGroupSprite({
   }
 
   function handleDragStart(e: Konva.KonvaEventObject<DragEvent>) {
+    if (hasPlacedMember) {
+      e.target.stopDrag();
+      e.target.position({ x: anchor.x, y: anchor.y });
+      return;
+    }
     // Same reasoning as `SoloPieceSprite`'s handleDragStart — warms up the
     // shared `AudioContext` for the whole drag's duration, not just at drop.
     // Skipped when muted (code review fix, 2026-09-02) — nothing to warm up
@@ -1150,9 +1173,28 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   );
   const pieces = livePieces ?? room.pieces;
   const clusters = liveClusters ?? room.clusters;
+  const roomGeom: FrameGeometry = useMemo(
+    () => ({
+      gridRows: room.gridRows,
+      gridCols: room.gridCols,
+      tileWidth: room.tileWidth,
+      tileHeight: room.tileHeight,
+    }),
+    [room.gridRows, room.gridCols, room.tileWidth, room.tileHeight],
+  );
   const clustersById = useMemo(
     () => new Map(clusters.map((c) => [c.id, c])),
     [clusters],
+  );
+
+  // Konva draws to a canvas context and can't resolve CSS var() itself —
+  // read the computed value once. Safe: RoomCanvas only ever mounts via
+  // RoomCanvasClient's `ssr: false` dynamic import, so `document` exists.
+  const frameOutlineColor = useMemo(
+    () =>
+      getComputedStyle(document.documentElement).getPropertyValue("--frame-outline").trim() ||
+      "#ff8a1e",
+    [],
   );
 
   const { halfExtentX, halfExtentY, frameWidth, frameHeight } = useMemo(() => {
@@ -1366,22 +1408,21 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // own "local-only override" idiom.
   const [predictedFusions, setPredictedFusions] = useState<readonly PredictedFusion[]>([]);
 
-  // A prediction is "confirmed" once every member's *real* `clusterId`
-  // agrees and actually resolves to a loaded Cluster row — Realtime has
-  // caught up, so the synthetic grouping this prediction guessed now exists
-  // for real. Checked as a plain derived value at render time, never via an
+  // A prediction is "confirmed" once real data has overtaken it — either the
+  // fusion it guessed now exists for real, or the drop turned out to place the
+  // whole group instead. `isPredictedFusionConfirmed` owns that rule and is
+  // unit-tested; see its own comment for why the placement outcome had to be
+  // part of it. Checked as a plain derived value at render time, never via an
   // effect + `setState` — matching this codebase's own established lesson
   // (Story 3.10, twice; the "derived at render time" comment a few lines
   // below on `scale`/`position`) that syncing external data into state with
   // an effect is the anti-pattern here, not the fix, whenever the answer is
   // directly computable from data already in hand.
   function isFusionConfirmed(pf: PredictedFusion): boolean {
-    const realClusterIds = new Set(
-      pf.memberIds.map((id) => pieces.find((p) => p.id === id)?.clusterId ?? null),
-    );
-    return (
-      realClusterIds.size === 1 && !realClusterIds.has(null) && clustersById.has([...realClusterIds][0]!)
-    );
+    return isPredictedFusionConfirmed({
+      memberStates: pf.memberIds.map((id) => pieces.find((p) => p.id === id)),
+      loadedClusterIds: new Set(clustersById.keys()),
+    });
   }
   // Confirmed predictions are dropped from `predictedFusions` opportunistically
   // (the next time a *new* fusion happens, itself a genuine event, not a
@@ -1664,13 +1705,29 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
           : [];
       }),
     ];
-    if (zOrder.length === 0) {
-      return items;
-    }
+    // Locked pieces always render *underneath* everything still in play.
+    //
+    // This is what guarantees a loose piece can never become unreachable, and
+    // it replaces a much heavier rule that used to enforce the same thing
+    // geometrically: placement was refused outright whenever a loose piece
+    // was resting on a target slot (`wouldBuryLoosePiece`), which in practice
+    // meant an unrelated piece lying on the board silently vetoed fusing with
+    // the assembled region — invisible and unexplainable in play (user
+    // report, 2026-09-20). A locked piece never moves again, so the danger
+    // was only ever that something *stays* underneath one; drawing locked
+    // pieces at the bottom makes that impossible by construction. Konva hit-
+    // tests in draw order, so a loose piece lying over the Frame keeps
+    // receiving the pointer and stays draggable — exactly like sliding a
+    // spare piece off a half-finished puzzle on a table.
+    const isLocked = (item: RenderItem) => item.type === "solo" && item.piece.placedRow != null;
     const rankByPieceId = new Map(zOrder.map((pieceId, index) => [pieceId, index]));
     const bestRank = (item: RenderItem) =>
       Math.max(-1, ...item.pieceIds.map((pieceId) => rankByPieceId.get(pieceId) ?? -1));
-    return [...items].sort((a, b) => bestRank(a) - bestRank(b));
+    // A stable sort, so items sharing a key keep their natural order — which
+    // is what preserves the existing "never touched, never reordered" feel.
+    return [...items].sort(
+      (a, b) => Number(isLocked(b)) - Number(isLocked(a)) || bestRank(a) - bestRank(b),
+    );
   }, [soloPieces, clusters, membersByClusterId, zOrder, predictedClustersById]);
 
   // Derived at render time, not synced via an effect: `scale`/`position`
@@ -1909,6 +1966,19 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
 
   }, []);
 
+  // Dev-only, and additionally gated on NEXT_PUBLIC_E2E_HOOKS — a no-op in
+  // every build that doesn't explicitly ask for it (see the hook's own
+  // comment). Exists because pieces live in a `<canvas>`: an automated
+  // browser has no DOM node to aim at and no way to read the live stage
+  // transform, which pan/pinch/autoscroll mutate outside React state.
+  // `pieceRenderPosition` is handed over rather than duplicated.
+  useStageTestHook({
+    stageRef,
+    pieces,
+    geom: roomGeom,
+    resolveWorld: (piece) => pieceRenderPosition(piece, clustersById, roomGeom),
+  });
+
   // Story 3.15: edge-autoscroll while a piece/Îlot is being dragged near the
   // viewport edge. `autoscrollNodeRef` is the dragged Konva node itself (a
   // `SoloPieceSprite`/`ClusterGroupSprite`'s own `<Group>`) — started/
@@ -2049,7 +2119,11 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   );
 
   return (
-    <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
+    <div
+      ref={containerRef}
+      className="absolute inset-0 bg-(--surface-canvas)"
+      style={{ touchAction: "none" }}
+    >
       <Stage
         ref={stageRef}
         width={stageSize.width}
@@ -2074,7 +2148,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
             y={-frameHeight / 2}
             width={frameWidth}
             height={frameHeight}
-            stroke="#A8541F"
+            stroke={frameOutlineColor}
             strokeWidth={3 / clampedScale}
             // Story 3.18 bug fix (user report: single-finger pan still
             // worked *inside* the Frame's own rectangle, after otherwise

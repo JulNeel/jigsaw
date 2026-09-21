@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { getRoomBySlug, type RoomDetail } from "@/lib/rooms/get-room-by-slug";
 import { RoomView } from "@/components/room/room-view";
 import { createClient } from "@/lib/auth/supabase-server";
+import { EmptyState } from "@/components/ui/empty-state";
 
 // No auth gate here, intentionally — this is the one route every prior
 // story's "gate behind sign-in" pattern deliberately does not apply to.
@@ -22,18 +23,16 @@ export default async function RoomPage({
     // fault, and telling them to double-check their link would be misleading.
     console.error("getRoomBySlug failed:", err);
     return (
-      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-3 py-24 text-center">
-        <h1 className="text-lg font-semibold">{t("errorTitle")}</h1>
-        <p className="text-sm text-muted-foreground">{t("errorBody")}</p>
+      <div className="mx-auto w-full max-w-md py-24">
+        <EmptyState glyph={null} title={t("errorTitle")} body={t("errorBody")} />
       </div>
     );
   }
 
   if (!room) {
     return (
-      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-3 py-24 text-center">
-        <h1 className="text-lg font-semibold">{t("notFoundTitle")}</h1>
-        <p className="text-sm text-muted-foreground">{t("notFoundBody")}</p>
+      <div className="mx-auto w-full max-w-md py-24">
+        <EmptyState glyph={null} title={t("notFoundTitle")} body={t("notFoundBody")} />
       </div>
     );
   }
@@ -65,7 +64,7 @@ export default async function RoomPage({
         <Link
           href={isGuest ? "/sign-in" : "/"}
           aria-label={isGuest ? t("signInAriaLabel") : t("backToHomeAriaLabel")}
-          className="flex size-9 items-center justify-center rounded-full bg-background/80 shadow-sm backdrop-blur-sm"
+          className="flex size-9 items-center justify-center rounded-full border border-border bg-card/90 shadow-sm backdrop-blur-sm"
         >
           {isGuest ? (
             <LogIn className="size-4" aria-hidden="true" />
@@ -73,7 +72,7 @@ export default async function RoomPage({
             <Home className="size-4" aria-hidden="true" />
           )}
         </Link>
-        <h1 className="pointer-events-none rounded-md bg-background/80 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
+        <h1 className="pointer-events-none rounded-md border border-border bg-card/90 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
           {room.name}
         </h1>
       </div>
