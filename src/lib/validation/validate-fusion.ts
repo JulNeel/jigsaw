@@ -29,20 +29,54 @@ export type ScreenPositioned = FusionPieceInfo & { screenX: number; screenY: num
  * Story 3.5 already validates for Frame integration, just applied wherever
  * the contact happens instead of only at a Frame slot.
  */
+/**
+ * What is standing between two touching pieces and a fusion.
+ *
+ * `"misoriented"` exists purely so the player can be told something useful.
+ * A refusal used to be a refusal: two pieces that genuinely belong together
+ * and are merely turned the wrong way produced exactly the same silent red
+ * pulse as two pieces that have nothing to do with each other (user report,
+ * 2026-09-22). One of those is worth acting on and the other is not, and
+ * nothing on screen distinguished them.
+ *
+ * It changes no rule — `isGenuineContact` still answers exactly what it
+ * always did, and is now derived from this so the two cannot drift.
+ */
+export type ContactVerdict = "genuine" | "misoriented" | "unrelated";
+
+export function classifyContact(
+  a: FusionPieceInfo,
+  b: FusionPieceInfo,
+  direction: OrthogonalDirection,
+  trueNeighborIdsOfA: ReadonlySet<string>,
+): ContactVerdict {
+  if (!trueNeighborIdsOfA.has(b.pieceId)) {
+    return "unrelated";
+  }
+  // Deliberately checked before the direction. Rotating a piece changes
+  // which way round the two sit on screen, so the direction they were
+  // detected in says nothing at all while either is turned — insisting on
+  // it here would report "unrelated" for the very pair the player is trying
+  // to join, which is the opposite of the truth.
+  if (a.rotation !== 0 || b.rotation !== 0) {
+    return "misoriented";
+  }
+  const delta = DIRECTION_OFFSETS[direction];
+  const adjacentAsPositioned =
+    b.gridRow === a.gridRow + delta.row && b.gridCol === a.gridCol + delta.col;
+  // True neighbours, both upright, but meeting on the wrong side: as
+  // positioned they are simply not adjacent, and "turn one of them" would be
+  // wrong advice.
+  return adjacentAsPositioned ? "genuine" : "unrelated";
+}
+
 export function isGenuineContact(
   a: FusionPieceInfo,
   b: FusionPieceInfo,
   direction: OrthogonalDirection,
   trueNeighborIdsOfA: ReadonlySet<string>,
 ): boolean {
-  if (a.rotation !== 0 || b.rotation !== 0) {
-    return false;
-  }
-  if (!trueNeighborIdsOfA.has(b.pieceId)) {
-    return false;
-  }
-  const delta = DIRECTION_OFFSETS[direction];
-  return b.gridRow === a.gridRow + delta.row && b.gridCol === a.gridCol + delta.col;
+  return classifyContact(a, b, direction, trueNeighborIdsOfA) === "genuine";
 }
 
 export type ContactCandidate = {
@@ -105,6 +139,24 @@ export function genuineContacts(
     return (
       trueNeighborIds !== undefined &&
       isGenuineContact(contact.a, contact.b, contact.direction, trueNeighborIds)
+    );
+  });
+}
+
+/**
+ * The contacts that only orientation is blocking — real neighbours, turned
+ * the wrong way. Never a reason to refuse anything on its own; it exists so
+ * a refusal can say which of the two refusals it is.
+ */
+export function misorientedContacts(
+  contacts: ContactCandidate[],
+  trueNeighborsByPieceId: ReadonlyMap<string, ReadonlySet<string>>,
+): ContactCandidate[] {
+  return contacts.filter((contact) => {
+    const trueNeighborIds = trueNeighborsByPieceId.get(contact.a.pieceId);
+    return (
+      trueNeighborIds !== undefined &&
+      classifyContact(contact.a, contact.b, contact.direction, trueNeighborIds) === "misoriented"
     );
   });
 }

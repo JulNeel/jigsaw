@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -62,6 +63,11 @@ import {
 // pass rather than silently treated as an extension of it.
 const PLACEMENT_PULSE_LOCKED_COLOR = "#2E7D32";
 const PLACEMENT_PULSE_REJECTED_COLOR = "#C62828";
+// `--grape-500`, the palette's own "pastilles, halos" value. A third colour
+// rather than a second red, because the two refusals call for opposite
+// reactions: red means these pieces have nothing to do with each other, this
+// means they belong together and one of them is simply turned the wrong way.
+const PLACEMENT_PULSE_MISORIENTED_COLOR = "#8b5cf6";
 const PLACEMENT_PULSE_DURATION_SECONDS = 0.32;
 
 // Gold `accent` (DESIGN.md) — reserved specifically for presence/completion
@@ -375,6 +381,7 @@ function SoloPieceSprite({
   onDragEnd,
   onInstantFrameLockOutcome,
   onGenuineFusion,
+  onMisorientedContact,
   highlightFramePieces,
 }: {
   piece: RoomDetailPiece;
@@ -390,6 +397,9 @@ function SoloPieceSprite({
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
   onGenuineFusion: (prediction: PredictedFusion) => void;
+  // Fired when a drop was refused *only* because of orientation — the one
+  // refusal the player can act on.
+  onMisorientedContact: () => void;
   // Story 3.16: dims this piece (via `PieceSprite`'s own `dimmed` prop)
   // whenever it's not a frame piece and the toggle is active.
   highlightFramePieces: boolean;
@@ -554,7 +564,20 @@ function SoloPieceSprite({
       // a genuine contact attempt that turns out false pulses red, the same
       // as a rejected placement always has, rather than staying silent the
       // way a free-space false contact used to.
-      onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_REJECTED_COLOR, dropPoint);
+      //
+      // Except when orientation is the only thing in the way (user report,
+      // 2026-09-22): those two pieces really are neighbours, the player can
+      // see it, and a red pulse identical to "these are unrelated" tells
+      // them nothing about the one thing they could do.
+      const misoriented = prediction.falseContactReason === "rotation";
+      onInstantFrameLockOutcome(
+        piece.id,
+        misoriented ? PLACEMENT_PULSE_MISORIENTED_COLOR : PLACEMENT_PULSE_REJECTED_COLOR,
+        dropPoint,
+      );
+      if (misoriented) {
+        onMisorientedContact();
+      }
     } else if (prediction.outcome === "placement-blocked") {
       onInstantFrameLockOutcome(
         piece.id,
@@ -637,6 +660,7 @@ function ClusterGroupSprite({
   onDragStart,
   onDragEnd,
   onInstantFrameLockOutcome,
+  onMisorientedContact,
   onPredictedClusterLock,
   onGenuineFusion,
   highlightFramePieces,
@@ -654,6 +678,7 @@ function ClusterGroupSprite({
   onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onInstantFrameLockOutcome: (pieceId: string, color: string, position: Point) => void;
+  onMisorientedContact: () => void;
   // Story 3.19: called only when a Frame-slot drop's own `predictedLock` is
   // `true` — see `handleDragEnd`'s own comment for what it carries.
   onPredictedClusterLock: (prediction: PredictedClusterLock) => void;
@@ -901,7 +926,18 @@ function ClusterGroupSprite({
       });
       markPredictedFusion(representativeMember.id, tempClusterId);
     } else if (prediction.outcome === "false-contact") {
-      onInstantFrameLockOutcome(representativeMember.id, PLACEMENT_PULSE_REJECTED_COLOR, dropPoint);
+      // Same distinction as `SoloPieceSprite`'s own branch — an Îlot brought
+      // against a neighbour it is turned away from is exactly as worth
+      // explaining as a single piece.
+      const misoriented = prediction.falseContactReason === "rotation";
+      onInstantFrameLockOutcome(
+        representativeMember.id,
+        misoriented ? PLACEMENT_PULSE_MISORIENTED_COLOR : PLACEMENT_PULSE_REJECTED_COLOR,
+        dropPoint,
+      );
+      if (misoriented) {
+        onMisorientedContact();
+      }
     } else if (prediction.outcome === "placement-blocked") {
       onInstantFrameLockOutcome(
         representativeMember.id,
@@ -1358,6 +1394,16 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // as a factual-but-warm toast (never a raw error code), echoed through
   // the same `aria-live` region Task 3.6 already established rather than a
   // second announcement mechanism.
+  // The one refusal a player can act on, so it gets words rather than only a
+  // colour. A fixed toast id rather than a fresh one per drop: trying the
+  // same two pieces three times in a row should replace the message, not
+  // stack three copies of it.
+  const announceMisorientedContact = useCallback(() => {
+    const message = t("misorientedContactMessage");
+    toast(message, { id: "misoriented-contact" });
+    announce(message);
+  }, [t]);
+
   useEffect(() => {
     return subscribePlacementConflict(() => {
       const message = t("placementConflictMessage");
@@ -2191,6 +2237,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
                   setDraggingKey(null);
                 }}
                 onInstantFrameLockOutcome={triggerPulse}
+                onMisorientedContact={announceMisorientedContact}
                 onGenuineFusion={addPredictedFusion}
                 highlightFramePieces={highlightFramePieces}
               />
@@ -2217,6 +2264,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
                   setDraggingKey(null);
                 }}
                 onInstantFrameLockOutcome={triggerPulse}
+                onMisorientedContact={announceMisorientedContact}
                 onPredictedClusterLock={addPredictedClusterLock}
                 onGenuineFusion={addPredictedFusion}
                 highlightFramePieces={highlightFramePieces}
