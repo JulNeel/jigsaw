@@ -87,7 +87,13 @@ export function createRoomCollections({
   // during a pending mutation therefore reports the pre-move number even
   // though the synced row has already advanced — which is exactly the state
   // `awaitVersion` has to be able to interrogate.
-  const confirmedVersionByPieceId = new Map<string, number>();
+  //
+  // It is also the high-water mark `writePieceRow` refuses to go back below,
+  // so a row delivered out of order cannot overwrite a newer one. Seeded from
+  // the page-load snapshot rather than left empty, so that guard covers the
+  // first event a piece receives too — a stale row buffered across a
+  // reconnect would otherwise be applied unchallenged.
+  const confirmedVersionByPieceId = new Map(initialPieces.map((p) => [p.id, p.version]));
 
   // The version this *same client's own* most recent successful move/place
   // actually produced, keyed by piece id — read from the Server Action's
@@ -369,6 +375,32 @@ export function createRoomCollections({
             clusterOffsetRow: row.cluster_offset_row as number | null,
             clusterOffsetCol: row.cluster_offset_col as number | null,
           };
+          // Older than what this client has already applied — drop it.
+          //
+          // One drag of a loose piece writes its row *twice*: `repositionPlain`
+          // sets `scatter_x`/`scatter_y` in one statement and bumps `version`
+          // in the next, so Postgres replicates two row changes for a single
+          // gesture, carrying versions N and N+1. Delivered in order that is
+          // harmless. Delivered swapped — measured, 8ms apart, on a real
+          // channel — the last one applied is the *pre-bump* row, and the
+          // collection is left holding version N for good.
+          //
+          // That is not a cosmetic lag. The client's cached version stays one
+          // behind the server's, so the next drag sends a stale
+          // `expectedVersion`, is rejected as STALE_WRITE, and the piece is
+          // rolled back onto the position the server already moved it away
+          // from — the "une pièce revient systématiquement à sa place" report,
+          // and the exact failure `e2e/out-of-order-events.e2e.ts` now pins.
+          //
+          // Dropping the older row loses nothing: it is only ever the first
+          // half of a pair whose second half carries the same data plus the
+          // bump (every other write in `piece-actions.ts` sets its columns and
+          // its version in one statement). A reconciliation read is unaffected
+          // — those rows are the truth, so they are never behind.
+          const applied = confirmedVersionByPieceId.get(piece.id);
+          if (applied != null && piece.version < applied) {
+            return;
+          }
           begin();
           write({ type: isInsert ? "insert" : "update", value: piece });
           commit();
