@@ -91,6 +91,19 @@ export async function dragPieceToWorld(
   await page.mouse.move(to.x, to.y);
   await flushFrames(page);
   await page.mouse.up();
+  // And again *after* releasing, which is not symmetry for its own sake.
+  // `dragend` is where the app does its work — prediction, the optimistic
+  // mutation, the Server Action dispatch — and Konva clears its own
+  // drag-and-drop state in the same pass. A `mouse.down` arriving before
+  // that pass completes is swallowed: the next drag then moves nothing at
+  // all, silently, and the test fails much later on a timeout that says
+  // nothing about the cause.
+  //
+  // Measured, not assumed: chasing an intermittent failure in
+  // `move-rejection.e2e.ts`, a diagnostic showed the second of two
+  // back-to-back drags leaving the piece exactly where the first had put it,
+  // with no Server Action call for it at all.
+  await flushFrames(page);
 
   return { from, to };
 }

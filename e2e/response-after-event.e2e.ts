@@ -1,4 +1,3 @@
-import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { readPiece, waitForDbVersionAbove } from "./support/db";
 import { dragPieceToWorld } from "./support/drag";
@@ -33,19 +32,6 @@ import { waitForVersionAbove } from "./support/wait";
  * one real browser.
  */
 
-/** Makes every Server Action response reach the page late. */
-async function delayServerActionResponses(page: Page, delayMs: number): Promise<void> {
-  await page.route("**/room/**", async (route) => {
-    if (route.request().method() !== "POST") {
-      await route.continue();
-      return;
-    }
-    const response = await route.fetch();
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    await route.fulfill({ response });
-  });
-}
-
 /**
  * Every one of the nine pieces is positioned by hand, which the other
  * fixtures don't bother with — and the reason is worth recording. The default
@@ -79,6 +65,7 @@ test("a move confirmed before its own response still settles", async ({
   openRoom,
   logCursor,
   clientErrors,
+  holdServerActionResponses,
 }) => {
   const room = await seed({
     gridRows: 3,
@@ -88,7 +75,7 @@ test("a move confirmed before its own response still settles", async ({
   const pieceId = room.pieceId(1, 1);
 
   await openRoom(room);
-  await delayServerActionResponses(page, 3_000);
+  await holdServerActionResponses(3_000);
 
   await dragPieceToWorld(page, pieceId, FIRST_DROP);
 

@@ -505,46 +505,50 @@ function SoloPieceSprite({
       // pulse mechanism, purely cosmetic acknowledgment.
       onInstantFrameLockOutcome(piece.id, PLACEMENT_PULSE_LOCKED_COLOR, dropPoint);
 
-      // Story 3.13: the actual optimistic *grouping* (drag the pair as
-      // one Îlot immediately) — deliberately scoped to the simplest,
-      // most common case: this piece fusing with exactly one other
-      // *solo* piece. A dragged Cluster, or a stationary piece already
-      // part of a Cluster, needs re-basing every existing member's own
-      // offset (`repositionOrFuse`'s own multi-member merge math) —
-      // deliberately out of scope here (this story's own Task 4
-      // allowance); those cases still get the pulse/chime above, just
-      // not the grouped-drag behavior yet.
-      const matchedStationaryId = prediction.candidates[0]?.b.pieceId;
-      const matchedStationaryPiece =
-        prediction.candidates.length === 1 && matchedStationaryId
-          ? pieces.find((p) => p.id === matchedStationaryId)
-          : undefined;
-      if (matchedStationaryPiece && matchedStationaryPiece.clusterId == null) {
-        const minGridRow = Math.min(piece.gridRow, matchedStationaryPiece.gridRow);
-        const minGridCol = Math.min(piece.gridCol, matchedStationaryPiece.gridCol);
-        const tempClusterId = crypto.randomUUID();
-        onGenuineFusion({
-          tempClusterId,
-          memberIds: [piece.id, matchedStationaryPiece.id],
-          // Mirrors `repositionOrFuse`'s own `mergedAnchorX/Y` formula
-          // exactly (`x - (draggedMember.gridCol - minGridCol) *
-          // tileWidth`, and the row equivalent) — `piece` is the
-          // dragged member here, at `dropPoint`.
-          anchorX: dropPoint.x - (piece.gridCol - minGridCol) * tileWidth,
-          anchorY: dropPoint.y - (piece.gridRow - minGridRow) * tileHeight,
-          offsetsByPieceId: new Map([
-            [piece.id, { row: piece.gridRow - minGridRow, col: piece.gridCol - minGridCol }],
-            [
-              matchedStationaryPiece.id,
-              {
-                row: matchedStationaryPiece.gridRow - minGridRow,
-                col: matchedStationaryPiece.gridCol - minGridCol,
-              },
-            ],
+      // Story 3.13: the actual optimistic *grouping* — drag the whole
+      // merged Îlot as one immediately, instead of leaving the pieces
+      // drawn apart until the server's own `cluster_id` comes back.
+      //
+      // Originally scoped to the simplest case only: this piece touching
+      // exactly one other *solo* piece. Whenever what it landed against
+      // was already part of an Îlot, the pulse and the chime were left to
+      // stand in for the grouping. User report (2026-09-21) — "lorsque
+      // j'associe plusieurs pièces libres, il y a immédiatement le son et
+      // le pulse, mais leur association visuelle prend parfois 2 ou 3
+      // secondes" — that wait is the server's confirmation arriving over
+      // Realtime, because in that case nothing was predicted at all.
+      //
+      // `mergedMemberIds` is what closes it: the *fully expanded* merged
+      // membership, a touched piece's whole Cluster included, which the
+      // narrow version had no way to obtain and so had to refuse. This is
+      // `ClusterGroupSprite`'s own fused branch verbatim (added 2026-09-12
+      // for the mirror-image report about dragging an Îlot onto a piece),
+      // with the dragged piece standing in for a representative member.
+      const mergedIds = prediction.mergedMemberIds ?? [piece.id];
+      const mergedGridPositions = mergedIds.map((id) => {
+        const known = id === piece.id ? piece : pieces.find((p) => p.id === id)!;
+        return { id, gridRow: known.gridRow, gridCol: known.gridCol };
+      });
+      const minGridRow = Math.min(...mergedGridPositions.map((m) => m.gridRow));
+      const minGridCol = Math.min(...mergedGridPositions.map((m) => m.gridCol));
+      const tempClusterId = crypto.randomUUID();
+      onGenuineFusion({
+        tempClusterId,
+        memberIds: [...mergedIds],
+        // Mirrors `repositionFuseOrPlace`'s own `mergedAnchorX/Y` formula
+        // exactly (`x - (draggedMember.gridCol - minGridCol) * tileWidth`,
+        // and the row equivalent) — `piece` is the dragged member here, at
+        // `dropPoint`.
+        anchorX: dropPoint.x - (piece.gridCol - minGridCol) * tileWidth,
+        anchorY: dropPoint.y - (piece.gridRow - minGridRow) * tileHeight,
+        offsetsByPieceId: new Map(
+          mergedGridPositions.map((m) => [
+            m.id,
+            { row: m.gridRow - minGridRow, col: m.gridCol - minGridCol },
           ]),
-        });
-        markPredictedFusion(piece.id, tempClusterId);
-      }
+        ),
+      });
+      markPredictedFusion(piece.id, tempClusterId);
     } else if (prediction.outcome === "false-contact") {
       // User-confirmed decision (2026-09-12): homogeneous everywhere now —
       // a genuine contact attempt that turns out false pulses red, the same
