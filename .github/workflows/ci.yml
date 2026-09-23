@@ -46,6 +46,18 @@ jobs:
 
       - run: pnpm lint
 
+      # `PageProps` and `LayoutProps` are *generated*, and `tsconfig.json`
+      # picks them up from `.next/types`. A clean checkout has no such
+      # directory, so type-checking without this fails on every page and
+      # layout in the app — which is exactly how this workflow failed on its
+      # own first run. It passed locally only because stale `.next-e2e` and
+      # `.next-prodcheck` type directories were lying around and are included
+      # too. `typegen` writes them without a full compile.
+      - name: Generate route types
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+        run: pnpm exec next typegen
+
       # `next build` type-checks too, but only after a full compile, and it
       # is the slowest step here. Running tsc first fails a type error in
       # seconds instead of minutes, and covers `e2e/` as well, which the
