@@ -113,5 +113,17 @@
     "placementConflictMessage": "Un autre Participant vient de la poser juste avant vous.",
     "frameCompleteAnnouncement": "Le puzzle est terminé — bravo à tout le Salon.",
     "misorientedContactMessage": "Ces deux pièces sont voisines, mais elles ne sont pas dans le bon sens. Cliquez sur une pièce libre pour la faire pivoter."
+  },
+  "Presence": {
+    "listAriaLabel": "Participants actifs dans le salon",
+    "anonymous": "Invité",
+    "arrived": "{name} a rejoint le salon.",
+    "left": "{name} a quitté le salon.",
+    "promptTitle": "Comment vous appelle-t-on ?",
+    "promptDescription": "Votre prénom s'affichera aux autres participants pendant que vous jouez. Vous pouvez aussi rester anonyme.",
+    "promptInputAriaLabel": "Votre prénom",
+    "promptPlaceholder": "Votre prénom",
+    "promptConfirm": "C'est parti",
+    "promptSkip": "Rester anonyme"
   }
 }

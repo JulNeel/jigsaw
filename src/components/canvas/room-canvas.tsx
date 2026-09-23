@@ -17,6 +17,8 @@ import { toast } from "sonner";
 import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import type { RoomDetail, RoomDetailCluster, RoomDetailPiece } from "@/lib/rooms/get-room-by-slug";
 import { createRoomCollections } from "@/lib/db/collections";
+import { usePresence } from "@/lib/rooms/use-presence";
+import { PresenceOverlay } from "@/components/room/presence-overlay";
 import { markPredictedLock, subscribePlacementConflict } from "@/lib/rooms/placement-conflict-events";
 import { subscribeMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
@@ -1129,11 +1131,23 @@ export type RoomCanvasProps = {
   // this value — see the story's own Dev Notes for why this is a plain
   // prop rather than an imperative-handle method like `recenter()`.
   highlightFramePieces: boolean;
+  // Story 4.1. The id is the Realtime presence key and is fixed at channel
+  // creation; the name arrives later, once the prompt is answered, which is
+  // why the two are separate props rather than one identity object.
+  participantId: string;
+  displayName: string | null;
 };
 
 // React 19 accepts `ref` as an ordinary prop on function components — no
 // `forwardRef` needed (that API is legacy now that this project is on 19.2).
-export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCanvasProps) {
+export function RoomCanvas({
+  room,
+  onReady,
+  ref,
+  highlightFramePieces,
+  participantId,
+  displayName,
+}: RoomCanvasProps) {
   // Fires once, on mount — past the dynamic import's own "Loading canvas…"
   // placeholder. AC #1 of Story 3.2 gates the first-access tutorial on
   // this, not on every individual piece tile finishing its own load (Story
@@ -1194,6 +1208,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
     collectionsRef.current = {
       roomId: room.id,
       collections: createRoomCollections({
+        participantId,
         roomId: room.id,
         initialPieces: room.pieces,
         initialClusters: room.clusters,
@@ -1201,7 +1216,11 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
       }),
     };
   }
-  const { pieceCollection, clusterCollection } = collectionsRef.current.collections;
+  const { pieceCollection, clusterCollection, presence } = collectionsRef.current.collections;
+  // Story 4.1. Lives here rather than in `RoomView` because this is where
+  // the Room's single Realtime channel is owned (AD-1) — the presence API
+  // is the only thing `createRoomCollections` exposes of it, deliberately.
+  const presentParticipants = usePresence(presence, participantId, displayName);
   const collection = pieceCollection;
   const { data: livePieces } = useLiveQuery(
     (q) => q.from({ pieces: pieceCollection }),
@@ -2292,6 +2311,10 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
       <div aria-live="polite" className="sr-only">
         {announcement}
       </div>
+      {/* Its own `aria-live` region inside, deliberately separate from the
+          one above (AC #3): presence changes must not compete with piece
+          placements for the same announcement channel. */}
+      <PresenceOverlay participants={presentParticipants} />
     </div>
   );
 }

@@ -85,7 +85,7 @@ development_status:
   epic-3-retrospective: optional
 
   epic-4: in-progress
-  4-1-live-presence: ready-for-dev
+  4-1-live-presence: review
   4-2-contributor-history: backlog
   4-3-sign-up-prompt-on-exit: backlog
   4-4-returning-participant-keeps-their-progress: backlog

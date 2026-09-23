@@ -92,8 +92,13 @@ export const test = base.extend<Fixtures>({
       await page.addInitScript((slug) => {
         try {
           window.sessionStorage.setItem(`jigsaw:tutorial-seen:${slug}`, "1");
+          // Story 4.1: a second first-load dialog. Without a stored name the
+          // prompt opens over the canvas and every drag in the suite fails
+          // on a blocked click — a symptom that points nowhere near its
+          // cause, which is why it is seeded here rather than dismissed.
+          window.localStorage.setItem("jigsaw:display-name", "E2E");
         } catch {
-          // A storage-less context just shows the tutorial; the test will
+          // A storage-less context just shows both dialogs; the test will
           // fail on a blocked click, which is a clear enough symptom.
         }
       }, room.slug);

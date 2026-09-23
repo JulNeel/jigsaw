@@ -29,6 +29,7 @@ import { createResyncScheduler } from "./resync-scheduler";
 import { createClient } from "@/lib/auth/supabase-browser";
 import { movePiece, rotatePiece } from "@/lib/rooms/piece-actions";
 import { fetchRoomState } from "@/lib/rooms/room-state";
+import type { PresencePayload } from "@/lib/rooms/presence";
 import {
   consumeAndCheckPredictedLock,
   emitPlacementConflict,
@@ -60,11 +61,17 @@ const AWAIT_VERSION_TIMEOUT_MS = 15000;
 
 export function createRoomCollections({
   roomId,
+  participantId,
   initialPieces,
   initialClusters,
   totalPieceCount,
 }: {
   roomId: string;
+  // Story 4.1: the Realtime *presence key*, which is what makes a reconnect
+  // replace this browser's entry instead of adding a second one. Needed at
+  // channel-creation time, which is why it comes in here rather than being
+  // handed to `presence.track()` later along with the name.
+  participantId: string;
   initialPieces: RoomDetailPiece[];
   initialClusters: RoomDetailCluster[];
   // Story 3.7: `gridRows * gridCols` — the Frame is a fixed rectangle, so
@@ -244,6 +251,36 @@ export function createRoomCollections({
   // only actually torn down once both have called `releaseChannel`.
   let channelRefCount = 0;
 
+  // Story 4.1 — presence rides this same channel, never a second one (NFR5 /
+  // AD-1). Supabase multiplexes it over the socket that already exists, so
+  // "no separate real-time channel" holds structurally rather than by
+  // promise. Nothing about presence is persisted: it lives here and dies
+  // with the session.
+  let presencePayload: PresencePayload | null = null;
+  let channelJoined = false;
+  const presenceListeners = new Set<() => void>();
+
+  function notifyPresenceListeners() {
+    for (const listener of presenceListeners) {
+      listener();
+    }
+  }
+
+  // Presence broadcasts to every subscriber in the Room, so a drag-heavy
+  // session would chatter without this. The exact cadence does not matter —
+  // the window it feeds is five minutes.
+  const PRESENCE_TRACK_THROTTLE_MS = 5_000;
+  let lastPresencePushAt = 0;
+
+  function pushPresence() {
+    // `track()` is only meaningful once joined; before that the payload is
+    // kept and sent by the subscribe callback below.
+    if (channelJoined && sharedChannel && presencePayload) {
+      lastPresencePushAt = Date.now();
+      void sharedChannel.track(presencePayload);
+    }
+  }
+
   // A tab that was hidden — backgrounded, the laptop asleep — is where a
   // connection most often dies without saying so. Reconciling on the way
   // back costs nothing while the tab is in use, and there is no polling: it
@@ -262,7 +299,12 @@ export function createRoomCollections({
     document.addEventListener("visibilitychange", handleVisibilityChange);
     sharedSupabase = createClient();
     sharedChannel = sharedSupabase
-      .channel(`room-${roomId}`)
+      // The presence key has to be fixed at creation — hence `participantId`
+      // being a parameter of this factory.
+      .channel(`room-${roomId}`, { config: { presence: { key: participantId } } })
+      .on("presence", { event: "sync" }, notifyPresenceListeners)
+      .on("presence", { event: "join" }, notifyPresenceListeners)
+      .on("presence", { event: "leave" }, notifyPresenceListeners)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "piece", filter: `room_id=eq.${roomId}` },
@@ -273,16 +315,29 @@ export function createRoomCollections({
         { event: "*", schema: "public", table: "cluster", filter: `room_id=eq.${roomId}` },
         (payload) => clusterHandler?.(payload),
       )
-      // No status callback: a dead subscription still reports SUBSCRIBED
-      // (measured — see `resyncRoom`), so there is no event here worth
-      // reacting to. Recovery is driven by the detectors that do work.
-      .subscribe();
+      // **The status callback is not a health check, and must not become
+      // one.** A dead subscription still reports SUBSCRIBED (measured — see
+      // `resyncRoom`), so nothing here is worth reacting to as a signal that
+      // the channel works. Recovery is still driven entirely by the
+      // detectors that do work. It exists for exactly one reason: `track()`
+      // is only meaningful once the channel has joined, so this is where a
+      // payload recorded before that gets sent.
+      .subscribe((status) => {
+        const joined = status === "SUBSCRIBED";
+        if (joined && !channelJoined) {
+          channelJoined = true;
+          pushPresence();
+        } else if (!joined) {
+          channelJoined = false;
+        }
+      });
   }
 
   function releaseChannel() {
     channelRefCount--;
     if (channelRefCount <= 0 && sharedSupabase && sharedChannel) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      channelJoined = false;
       sharedSupabase.removeChannel(sharedChannel);
       sharedChannel = null;
       sharedSupabase = null;
@@ -478,6 +533,8 @@ export function createRoomCollections({
       // wrong guess.
       const speculativeVersion = expectedVersion + 1;
       ownLastKnownVersionByPieceId.set(pieceId, speculativeVersion);
+      // Story 4.1: every interaction that reaches the server passes here.
+      presence.reportActivity();
       // Story 3.19's unified mechanic: `placePiece` is gone — `movePiece`
       // is the single drag-end Server Action now, everywhere (Frame or
       // free space alike). This must never depend on the client's own
@@ -667,5 +724,49 @@ export function createRoomCollections({
     },
   });
 
-  return { pieceCollection, clusterCollection };
+  /**
+   * Story 4.1 — the only presence surface the rest of the app gets.
+   *
+   * The channel object itself is deliberately *not* exposed: handing it out
+   * would make AD-1's "one channel per Room, never a second" unenforceable
+   * by reading the code, which is the only way it is enforced at all.
+   */
+  const presence = {
+    /** Replaces what this browser broadcasts about itself. Never throttled —
+     *  an identity change is rare and should show up at once. */
+    track(payload: PresencePayload) {
+      presencePayload = payload;
+      pushPresence();
+    },
+    /**
+     * "This Participant just did something."
+     *
+     * Called from `onUpdate` rather than from the canvas, because every
+     * move, rotation and placement this client dispatches goes through
+     * there — one place, and impossible to forget when a new interaction is
+     * added later.
+     */
+    reportActivity() {
+      if (!presencePayload) {
+        return;
+      }
+      presencePayload = { ...presencePayload, lastActivityAt: Date.now() };
+      if (Date.now() - lastPresencePushAt >= PRESENCE_TRACK_THROTTLE_MS) {
+        pushPresence();
+      }
+    },
+    /** Raw presence state, keyed by presence key — `toPresentParticipants` shapes it. */
+    state(): Record<string, unknown[]> {
+      return (sharedChannel?.presenceState() ?? {}) as Record<string, unknown[]>;
+    },
+    /** Fires on join, leave and sync. Returns its own unsubscribe. */
+    subscribe(listener: () => void): () => void {
+      presenceListeners.add(listener);
+      return () => {
+        presenceListeners.delete(listener);
+      };
+    },
+  };
+
+  return { pieceCollection, clusterCollection, presence };
 }

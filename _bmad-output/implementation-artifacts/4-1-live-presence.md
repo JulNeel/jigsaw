@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 4.1: Live presence
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -26,46 +26,46 @@ So that the Room feels like a shared, lived-in space rather than a static docume
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Identity — a name and a stable id that survive a reload (AC: #1)
-  - [ ] `src/lib/rooms/display-name.ts`, mirroring `tutorial-seen.ts` *exactly*: injected `SimpleStorage`, `null` meaning "storage unavailable", never throwing, and a `getSafeLocalStorage()` alongside the existing `getSafeSessionStorage()`. That file's own comment explains why this matters — a privacy-configured browser can throw on the *property access itself*, and a Guest reaching this app with zero friction is exactly the person likely to have one.
-  - [ ] **`localStorage`, not `sessionStorage`, and deliberately not per-Room.** The tutorial is per-tab and per-Room on purpose; a name is neither. Key `jigsaw:display-name`, plus `jigsaw:participant-id` (a `crypto.randomUUID()` minted once).
-  - [ ] **`participantId` is not cosmetic**: it is the Realtime presence *key*, which is what makes a reconnect replace an entry rather than duplicate it. It must exist before the channel is created (see Task 3), so mint it at module load, not when the name is known.
-  - [ ] Unit tests mirroring `tutorial-seen.test.ts`, including the storage-throws case.
+- [x] Task 1: Identity — a name and a stable id that survive a reload (AC: #1)
+  - [x] `src/lib/rooms/display-name.ts`, mirroring `tutorial-seen.ts` *exactly*: injected `SimpleStorage`, `null` meaning "storage unavailable", never throwing, and a `getSafeLocalStorage()` alongside the existing `getSafeSessionStorage()`. That file's own comment explains why this matters — a privacy-configured browser can throw on the *property access itself*, and a Guest reaching this app with zero friction is exactly the person likely to have one.
+  - [x] **`localStorage`, not `sessionStorage`, and deliberately not per-Room.** The tutorial is per-tab and per-Room on purpose; a name is neither. Key `jigsaw:display-name`, plus `jigsaw:participant-id` (a `crypto.randomUUID()` minted once).
+  - [x] **`participantId` is not cosmetic**: it is the Realtime presence *key*, which is what makes a reconnect replace an entry rather than duplicate it. It must exist before the channel is created (see Task 3), so mint it at module load, not when the name is known.
+  - [x] Unit tests mirroring `tutorial-seen.test.ts`, including the storage-throws case.
 
-- [ ] Task 2: The name prompt — ask, never block (AC: #1)
-  - [ ] **Read `first-access-tutorial.tsx` and `room-view.tsx` in full first.** The tutorial is already a blocking dialog for Guests, gated on `isGuest && canvasReady`. A second blocking gate in front of it would make entering a Room a two-step form.
-  - [ ] Shown to **everyone without a stored name**, not only Guests: sign-up collects email and password and nothing else (`src/lib/auth/actions.ts` — verified 2026-09-23), so a registered Participant has no display name either. An e-mail must never be shown to other Participants.
-  - [ ] **Skippable, with a fallback** — this is the compromise that keeps the zero-friction principle intact. Dismissing gives the Participant `Invité` plus their colour, and they can still be seen and seen by. The name is an invitation, not a toll. **Flagged for the user**: if you would rather the prompt be mandatory, say so — it is a one-line change here and a principle change in the product.
-  - [ ] Sequenced after the tutorial for a Guest, shown alone otherwise.
-  - [ ] A colour derived deterministically from `participantId` (a small fixed palette drawn from `globals.css`, never a random hex — the palette is warm and narrow, and an arbitrary colour will clash).
+- [x] Task 2: The name prompt — ask, never block (AC: #1)
+  - [x] **Read `first-access-tutorial.tsx` and `room-view.tsx` in full first.** The tutorial is already a blocking dialog for Guests, gated on `isGuest && canvasReady`. A second blocking gate in front of it would make entering a Room a two-step form.
+  - [x] Shown to **everyone without a stored name**, not only Guests: sign-up collects email and password and nothing else (`src/lib/auth/actions.ts` — verified 2026-09-23), so a registered Participant has no display name either. An e-mail must never be shown to other Participants.
+  - [x] **Skippable, with a fallback** — this is the compromise that keeps the zero-friction principle intact. Dismissing gives the Participant `Invité` plus their colour, and they can still be seen and seen by. The name is an invitation, not a toll. **Flagged for the user**: if you would rather the prompt be mandatory, say so — it is a one-line change here and a principle change in the product.
+  - [x] Sequenced after the tutorial for a Guest, shown alone otherwise.
+  - [x] A colour derived deterministically from `participantId` (a small fixed palette drawn from `globals.css`, never a random hex — the palette is warm and narrow, and an arbitrary colour will clash).
 
-- [ ] Task 3: Presence on the existing channel (AC: #4)
-  - [ ] **Read `collections.ts`'s `ensureChannel`/`releaseChannel` in full before touching either.** That module owns the single channel (AD-1) and is reference-counted across two collections.
-  - [ ] Supabase Presence rides the same channel — `track`, `untrack`, `presenceState` confirmed present in `@supabase/realtime-js` 2.112.2 (verified 2026-09-23). No second channel, no second client: AC #4 is satisfied structurally rather than by promise.
-  - [ ] The presence **key** is set in `.channel(name, { config: { presence: { key } } })`, i.e. at creation. So `participantId` must be passed into `createRoomCollections`. The *name* need not — it arrives later through `track()` once the prompt resolves, which is exactly why the two are separate in Task 1.
-  - [ ] **`.subscribe()` deliberately has no status callback today, and the reason is written into the code**: a dead channel still reports `SUBSCRIBED`, so status is worthless as a health signal. Presence needs one anyway — `track()` can only be called once joined. Re-add it for *that* purpose only, and leave the existing comment's warning intact rather than quietly deleting it: it is still true, and someone will otherwise "restore" health-checking on the back of this change.
-  - [ ] Expose presence from `createRoomCollections` (`{ pieceCollection, clusterCollection, presence }`) rather than leaking the channel object. Leaking it would make AD-1 unenforceable by inspection.
+- [x] Task 3: Presence on the existing channel (AC: #4)
+  - [x] **Read `collections.ts`'s `ensureChannel`/`releaseChannel` in full before touching either.** That module owns the single channel (AD-1) and is reference-counted across two collections.
+  - [x] Supabase Presence rides the same channel — `track`, `untrack`, `presenceState` confirmed present in `@supabase/realtime-js` 2.112.2 (verified 2026-09-23). No second channel, no second client: AC #4 is satisfied structurally rather than by promise.
+  - [x] The presence **key** is set in `.channel(name, { config: { presence: { key } } })`, i.e. at creation. So `participantId` must be passed into `createRoomCollections`. The *name* need not — it arrives later through `track()` once the prompt resolves, which is exactly why the two are separate in Task 1.
+  - [x] **`.subscribe()` deliberately has no status callback today, and the reason is written into the code**: a dead channel still reports `SUBSCRIBED`, so status is worthless as a health signal. Presence needs one anyway — `track()` can only be called once joined. Re-add it for *that* purpose only, and leave the existing comment's warning intact rather than quietly deleting it: it is still true, and someone will otherwise "restore" health-checking on the back of this change.
+  - [x] Expose presence from `createRoomCollections` (`{ pieceCollection, clusterCollection, presence }`) rather than leaking the channel object. Leaking it would make AD-1 unenforceable by inspection.
 
-- [ ] Task 4: What "active" means, and how someone disappears (AC: #1, #2)
-  - [ ] Activity is a **piece interaction** — a completed drag or a rotation — not merely being connected, and not pan/zoom.
-  - [ ] **The window is 5 minutes, and the AC was changed to say so (user decision, 2026-09-23).** It read 30 seconds, which this story's first draft flagged as producing a list that answers "who is working" rather than "who is here" — someone watching you play would have vanished after half a minute, in a feature whose stated purpose is to make the Room "feel like a shared, lived-in space". Five minutes answers the question the story actually asks.
-  - [ ] **The two ways of disappearing are not the same mechanism, and only one of them uses that window.** A Participant who closes the tab drops the socket, Supabase emits a presence `leave`, and they are gone at once (AC #2b) — the window never applies to someone who has actually left. It governs only the person still connected and idle. That is what makes five minutes safe rather than stale: the cost of a longer window is a lingering *idle* entry, never a ghost.
-  - [ ] Payload: `{ participantId, name, colour, lastActivityAt }`. Re-`track()` on activity, throttled to at most once every ~5s — presence broadcasts to every subscriber, and a drag-heavy session would otherwise chatter.
-  - [ ] **Disappearing costs no traffic at all.** An idle Participant simply stops re-tracking; their payload goes stale in everyone's `presenceState()`, and each client filters locally. Nothing needs to be sent for someone to fade out, which is what makes this cheap.
-  - [ ] The local re-evaluation ticker should be sized to the window, not copied from it: ~30s is ample for a 5-minute cutoff, where a 5s tick would be sixty wake-ups to notice one change. Precision here buys nothing — nobody can tell whether a name vanished at 5:00 or 5:20.
-  - [ ] The window is a named constant, and the *pure* predicate (`isActive(lastActivityAt, now)`) plus the state-to-list reduction (dedupe by key, stable ordering) live in their own module so they can be unit-tested without a browser.
+- [x] Task 4: What "active" means, and how someone disappears (AC: #1, #2)
+  - [x] Activity is a **piece interaction** — a completed drag or a rotation — not merely being connected, and not pan/zoom.
+  - [x] **The window is 5 minutes, and the AC was changed to say so (user decision, 2026-09-23).** It read 30 seconds, which this story's first draft flagged as producing a list that answers "who is working" rather than "who is here" — someone watching you play would have vanished after half a minute, in a feature whose stated purpose is to make the Room "feel like a shared, lived-in space". Five minutes answers the question the story actually asks.
+  - [x] **The two ways of disappearing are not the same mechanism, and only one of them uses that window.** A Participant who closes the tab drops the socket, Supabase emits a presence `leave`, and they are gone at once (AC #2b) — the window never applies to someone who has actually left. It governs only the person still connected and idle. That is what makes five minutes safe rather than stale: the cost of a longer window is a lingering *idle* entry, never a ghost.
+  - [x] Payload: `{ participantId, name, colour, lastActivityAt }`. Re-`track()` on activity, throttled to at most once every ~5s — presence broadcasts to every subscriber, and a drag-heavy session would otherwise chatter.
+  - [x] **Disappearing costs no traffic at all.** An idle Participant simply stops re-tracking; their payload goes stale in everyone's `presenceState()`, and each client filters locally. Nothing needs to be sent for someone to fade out, which is what makes this cheap.
+  - [x] The local re-evaluation ticker should be sized to the window, not copied from it: ~30s is ample for a 5-minute cutoff, where a 5s tick would be sixty wake-ups to notice one change. Precision here buys nothing — nobody can tell whether a name vanished at 5:00 or 5:20.
+  - [x] The window is a named constant, and the *pure* predicate (`isActive(lastActivityAt, now)`) plus the state-to-list reduction (dedupe by key, stable ordering) live in their own module so they can be unit-tested without a browser.
 
-- [ ] Task 5: The overlay and its announcements (AC: #1, #3)
-  - [ ] Avatars overlay top-right — the only free corner: top-left holds the back link and Room name, the right edge holds the vertical tool stack.
-  - [ ] **Its own `aria-live="polite"` region, not `RoomCanvas`'s.** AC #3 says "decoupled from Canvas manipulation", and the existing region is already carrying placement announcements — sharing it would have presence changes compete with a piece being placed, and lose.
-  - [ ] Announce arrivals and departures as names, not counts, and never on the first render (an initial list of four people must not be announced as four arrivals).
-  - [ ] French copy in `messages/fr.json` under `Canvas` or a new `Presence` namespace.
+- [x] Task 5: The overlay and its announcements (AC: #1, #3)
+  - [x] Avatars overlay top-right — the only free corner: top-left holds the back link and Room name, the right edge holds the vertical tool stack.
+  - [x] **Its own `aria-live="polite"` region, not `RoomCanvas`'s.** AC #3 says "decoupled from Canvas manipulation", and the existing region is already carrying placement announcements — sharing it would have presence changes compete with a piece being placed, and lose.
+  - [x] Announce arrivals and departures as names, not counts, and never on the first render (an initial list of four people must not be announced as four arrivals).
+  - [x] French copy in `messages/fr.json` under `Canvas` or a new `Presence` namespace.
 
-- [ ] Task 6: Tests and the harness debt this creates (AC: all)
-  - [ ] Unit: the storage helpers, `isActive`, the presence-state reduction, and the colour derivation.
-  - [ ] **e2e: every existing test breaks unless this is handled.** `fixtures.ts`'s `openRoom` pre-seeds `jigsaw:tutorial-seen` to get past the tutorial; a new prompt needs the same treatment (`jigsaw:display-name`), and so do the *three* files that build their own contexts by hand rather than using the fixture — `realtime-gap.e2e.ts`, `cluster-lock-in.e2e.ts`, `out-of-order-events.e2e.ts`. Miss one and it fails on a blocked click, which looks nothing like the cause.
-  - [ ] e2e: two contexts, one drags a piece, the other sees them appear in the overlay. The 30s expiry is **not** worth an e2e test at real time — that is a 30-second wall-clock wait for something a unit test proves exactly. Assert appearance in the browser, prove expiry in Vitest.
-  - [ ] `pnpm lint`, `pnpm exec tsc --noEmit`, `pnpm test`, `pnpm build`, and the full `pnpm e2e` suite green. CI now runs the first four on the PR.
+- [x] Task 6: Tests and the harness debt this creates (AC: all)
+  - [x] Unit: the storage helpers, `isActive`, the presence-state reduction, and the colour derivation.
+  - [x] **e2e: every existing test breaks unless this is handled.** `fixtures.ts`'s `openRoom` pre-seeds `jigsaw:tutorial-seen` to get past the tutorial; a new prompt needs the same treatment (`jigsaw:display-name`), and so do the *three* files that build their own contexts by hand rather than using the fixture — `realtime-gap.e2e.ts`, `cluster-lock-in.e2e.ts`, `out-of-order-events.e2e.ts`. Miss one and it fails on a blocked click, which looks nothing like the cause.
+  - [x] e2e: two contexts, one drags a piece, the other sees them appear in the overlay. The 30s expiry is **not** worth an e2e test at real time — that is a 30-second wall-clock wait for something a unit test proves exactly. Assert appearance in the browser, prove expiry in Vitest.
+  - [x] `pnpm lint`, `pnpm exec tsc --noEmit`, `pnpm test`, `pnpm build`, and the full `pnpm e2e` suite green. CI now runs the first four on the PR.
 
 ## Dev Notes
 
@@ -109,11 +109,27 @@ Pure logic in its own modules under `src/lib/rooms/`, unit-tested under Vitest's
 
 ### Agent Model Used
 
-### Debug Log References
+Claude Opus 5
 
 ### Completion Notes List
 
+- All six tasks implemented. `pnpm lint`, `pnpm exec tsc --noEmit`, `pnpm test` (270 tests) and `pnpm build` clean; `pnpm e2e` 25/25.
+- **Task 4's activity hook landed somewhere better than the story proposed.** Rather than reporting activity from the canvas's drag handlers, `presence.reportActivity()` is called from `collections.ts`'s `onUpdate` — every move, rotation and placement this client dispatches already passes through there, so it is one place and impossible to forget when a new interaction is added.
+- **Task 2's sequencing needed a signal the story had not anticipated.** Gating the name prompt on "the tutorial was dismissed" would never fire for a returning Guest, who never sees the tutorial at all — they would never be asked for a name. `FirstAccessTutorial` now reports `onResolved` in *both* cases.
+- A skip is "not now", not "never": it sets this visit's answer without writing anything, so the prompt returns on the next visit. Recorded because it is a product decision taken during implementation, not one the story specified.
+- **Not verified, and deliberately so:** the 5-minute expiry has no browser test. It is a pure function of a timestamp and a clock, proved exactly in `presence.test.ts`; an e2e version would mean a five-minute wall-clock wait for a weaker result. AC #2b (immediate departure) *is* verified in a browser, because that one depends on Supabase's own `leave` event rather than on our arithmetic.
+- **Harness debt, as predicted, and it was all four entry points.** The fixture plus the three specs that build their own `BrowserContext` for `routeWebSocket` all needed the name seeded; missing one fails on a blocked click.
+- **`e2e/move-rejection.e2e.ts` failed once across eleven full runs during this work** (~9%), with the same signature as the flake declared resolved on 2026-09-22. That "resolved" was called on ten consecutive green runs, which at this rate happen 39% of the time by chance. `deferred-work.md` has been corrected and the item reopened. This story's presence work cannot be cleanly exonerated, though the signature points at the gesture rather than at the channel.
+
 ### File List
+
+- `src/lib/rooms/participant-identity.ts` (new, + test) — name, id and colour, mirroring `tutorial-seen.ts`'s storage contract.
+- `src/lib/rooms/presence.ts` (new, + test) — the window, the pure state reduction, the arrival/departure diff.
+- `src/lib/rooms/use-presence.ts` (new) — the two clocks: channel events, and a 30s ticker for going quiet.
+- `src/components/room/name-prompt.tsx` (new), `src/components/room/presence-overlay.tsx` (new).
+- `src/lib/db/collections.ts` (modified) — presence on the existing channel, the `.subscribe()` callback and its warning, `reportActivity` from `onUpdate`.
+- `src/components/canvas/room-canvas.tsx`, `src/components/room/room-view.tsx`, `src/components/room/first-access-tutorial.tsx`, `messages/fr.json` (modified).
+- `e2e/presence.e2e.ts` (new); `e2e/support/fixtures.ts`, `e2e/support/drag.ts`, `e2e/realtime-gap.e2e.ts`, `e2e/cluster-lock-in.e2e.ts`, `e2e/out-of-order-events.e2e.ts` (modified).
 
 ## Change Log
 
