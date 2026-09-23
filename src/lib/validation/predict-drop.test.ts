@@ -272,3 +272,52 @@ describe("predictDropOutcome — corner bootstrap", () => {
     expect(result.outcome).toBe("none");
   });
 });
+
+describe("predictDropOutcome — why a contact was refused", () => {
+  // Both turned the same way, so they interlock perfectly on screen and the
+  // player can see they belong together. The app refuses anyway (fusion
+  // requires as-cut orientation), and used to refuse in exactly the same way
+  // as for two pieces that have nothing to do with each other.
+  it("reports rotation when the refused contact is a real neighbour turned the wrong way", () => {
+    const a = dragged({ pieceId: "a", gridRow: 0, gridCol: 0, screenX: 0, screenY: 0, rotation: 90 });
+    const b = piece({ id: "b", gridRow: 0, gridCol: 1, rotation: 90, scatterX: TILE_WIDTH, scatterY: 0 });
+    const result = predictDropOutcome({
+      draggedMembers: [a],
+      pieces: [draggedAsPiece(a), b],
+      excludePieceIds: new Set(["a"]),
+      clustersById: noClusters,
+      geom,
+    });
+    expect(result.outcome).toBe("false-contact");
+    expect(result.falseContactReason).toBe("rotation");
+  });
+
+  it("reports unrelated when the refused contact is not a neighbour at all", () => {
+    const a = dragged({ pieceId: "a", gridRow: 0, gridCol: 0, screenX: 0, screenY: 0 });
+    // Far away in the true grid, so no rotation could ever make these fit.
+    const b = piece({ id: "b", gridRow: 7, gridCol: 7, scatterX: TILE_WIDTH, scatterY: 0 });
+    const result = predictDropOutcome({
+      draggedMembers: [a],
+      pieces: [draggedAsPiece(a), b],
+      excludePieceIds: new Set(["a"]),
+      clustersById: noClusters,
+      geom,
+    });
+    expect(result.outcome).toBe("false-contact");
+    expect(result.falseContactReason).toBe("unrelated");
+  });
+
+  it("leaves the reason unset when nothing was refused", () => {
+    const a = dragged({ pieceId: "a", gridRow: 0, gridCol: 0, screenX: 0, screenY: 0 });
+    const b = piece({ id: "b", gridRow: 0, gridCol: 1, scatterX: TILE_WIDTH, scatterY: 0 });
+    const result = predictDropOutcome({
+      draggedMembers: [a],
+      pieces: [draggedAsPiece(a), b],
+      excludePieceIds: new Set(["a"]),
+      clustersById: noClusters,
+      geom,
+    });
+    expect(result.outcome).toBe("fused");
+    expect(result.falseContactReason).toBeUndefined();
+  });
+});

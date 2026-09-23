@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyContact,
   findContactCandidates,
   genuineContacts,
   isGenuineContact,
+  misorientedContacts,
   validateFusion,
   type FusionPieceInfo,
 } from "./validate-fusion";
@@ -10,6 +12,71 @@ import {
 function piece(pieceId: string, gridRow: number, gridCol: number, rotation = 0): FusionPieceInfo {
   return { pieceId, gridRow, gridCol, rotation };
 }
+
+describe("classifyContact", () => {
+  it("calls a true neighbour in the right direction, both unrotated, genuine", () => {
+    expect(classifyContact(piece("a", 3, 5), piece("b", 3, 6), "right", new Set(["b"]))).toBe(
+      "genuine",
+    );
+  });
+
+  it("calls a true neighbour misoriented when either piece is rotated", () => {
+    // The pair the user actually hits: both turned the same way, so they
+    // interlock perfectly on screen, and the app refuses them anyway.
+    expect(
+      classifyContact(piece("a", 3, 5, 90), piece("b", 3, 6, 90), "right", new Set(["b"])),
+    ).toBe("misoriented");
+    // One of the two is enough — that one needs turning back.
+    expect(classifyContact(piece("a", 3, 5), piece("b", 3, 6, 270), "right", new Set(["b"]))).toBe(
+      "misoriented",
+    );
+  });
+
+  it("calls a true neighbour misoriented whatever direction it was met from", () => {
+    // Rotation changes which way round two pieces sit, so the direction they
+    // were detected in says nothing while either is turned. Reporting
+    // "unrelated" here would tell the player the opposite of the truth.
+    expect(
+      classifyContact(piece("a", 3, 5, 90), piece("b", 3, 6, 90), "down", new Set(["b"])),
+    ).toBe("misoriented");
+  });
+
+  it("calls a piece that isn't a true neighbour unrelated, rotated or not", () => {
+    expect(classifyContact(piece("a", 3, 5), piece("b", 8, 8), "right", new Set(["c"]))).toBe(
+      "unrelated",
+    );
+    expect(classifyContact(piece("a", 3, 5, 90), piece("b", 8, 8), "right", new Set(["c"]))).toBe(
+      "unrelated",
+    );
+  });
+
+  it("calls two unrotated true neighbours met from the wrong side unrelated", () => {
+    // Nothing to do with orientation: as positioned they simply are not
+    // adjacent, and telling the player to rotate would be wrong advice.
+    expect(classifyContact(piece("a", 3, 5), piece("b", 3, 6), "down", new Set(["b"]))).toBe(
+      "unrelated",
+    );
+  });
+});
+
+describe("misorientedContacts", () => {
+  const trueNeighbors = new Map([["a", new Set(["b"])]]);
+
+  it("picks out the contacts that only orientation is blocking", () => {
+    const contacts = [
+      { a: piece("a", 3, 5, 90), b: piece("b", 3, 6, 90), direction: "right" as const },
+      { a: piece("a", 3, 5), b: piece("z", 9, 9), direction: "right" as const },
+    ];
+    expect(misorientedContacts(contacts, trueNeighbors).map((c) => c.b.pieceId)).toEqual(["b"]);
+  });
+
+  it("is empty when the contact would have worked anyway", () => {
+    const contacts = [
+      { a: piece("a", 3, 5), b: piece("b", 3, 6), direction: "right" as const },
+    ];
+    expect(misorientedContacts(contacts, trueNeighbors)).toEqual([]);
+  });
+});
 
 describe("isGenuineContact", () => {
   it("accepts a true right-neighbor sitting to the right on screen", () => {

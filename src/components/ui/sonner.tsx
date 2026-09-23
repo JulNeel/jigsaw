@@ -11,6 +11,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme="light"
+      // Bottom centre: a toast here comments on something the player just
+      // did on the canvas, and the canvas fills the screen. A corner puts
+      // the explanation as far as possible from the gesture that caused it.
+      position="bottom-center"
+      // Lets a typed toast carry its own colour instead of the neutral
+      // popover fill. Untyped `toast()` calls are unaffected — they stay
+      // exactly as they were.
+      richColors
       className="toaster group"
       icons={{
         success: (
@@ -34,6 +42,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
+          "--warning-bg": "var(--warning-subtle)",
+          "--warning-text": "var(--warning)",
+          "--warning-border": "var(--sand-400)",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }

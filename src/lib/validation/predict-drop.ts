@@ -2,6 +2,7 @@ import {
   CONTACT_TOLERANCE_FACTOR,
   findContactCandidates,
   genuineContacts,
+  misorientedContacts,
   type ContactCandidate,
 } from "./validate-fusion";
 import { computeTrueNeighborIds } from "./true-neighbors";
@@ -101,6 +102,11 @@ export type PredictedDrop = {
   candidates: readonly ContactCandidate[];
   placedSlotByPieceId?: ReadonlyMap<string, { row: number; col: number }>;
   blockedReason?: "conflict" | "bounds" | "occupied";
+  // Only set alongside `"false-contact"`, and only so the refusal can be
+  // explained: `"rotation"` means the pieces really are neighbours and one
+  // of them is simply turned off its as-cut orientation — the one case where
+  // the player has something to do about it.
+  falseContactReason?: "rotation" | "unrelated";
   mergedMemberIds?: readonly string[];
 };
 
@@ -147,9 +153,13 @@ export function predictDropOutcome(params: {
     screenY: m.screenY,
   }));
   let genuinelyFused = false;
+  // Hoisted so the refusal at the bottom can reuse it, but still only built
+  // when something is actually touching: `computeTrueNeighborIds` scans the
+  // whole piece list per dragged member, and this runs on every drop.
+  let trueNeighborsByPieceId: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   if (candidates.length > 0) {
-    const trueNeighborsByPieceId = new Map(
+    trueNeighborsByPieceId = new Map(
       draggedMembers.map((m) => [m.pieceId, computeTrueNeighborIds(m.pieceId, pieces)]),
     );
     // Mirrors `repositionFuseOrPlace` exactly (AD-2): an incidental contact
@@ -295,7 +305,14 @@ export function predictDropOutcome(params: {
     return { outcome: "fused", candidates, mergedMemberIds: [...mergedIds] };
   }
   if (candidates.length > 0) {
-    return { outcome: "false-contact", candidates };
+    const misoriented = trueNeighborsByPieceId
+      ? misorientedContacts(candidates, trueNeighborsByPieceId)
+      : [];
+    return {
+      outcome: "false-contact",
+      candidates,
+      falseContactReason: misoriented.length > 0 ? "rotation" : "unrelated",
+    };
   }
   return { outcome: "none", candidates };
 }
