@@ -4,10 +4,11 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/auth/supabase-server";
 import { classifySignUpError } from "@/lib/auth/classify-sign-up-error";
+import { normalizePseudo } from "@/lib/rooms/participant-identity";
 
 export type AuthFormState = {
   error?: {
-    field: "email" | "password" | "general";
+    field: "pseudo" | "email" | "password" | "general";
     message: string;
   };
 };
@@ -21,10 +22,15 @@ export async function signUp(
   formData: FormData,
 ): Promise<SignUpState> {
   const t = await getTranslations("Auth");
+  const pseudoField = formData.get("pseudo");
   const emailField = formData.get("email");
   const passwordField = formData.get("password");
 
-  if (typeof emailField !== "string" || typeof passwordField !== "string") {
+  if (
+    typeof pseudoField !== "string" ||
+    typeof emailField !== "string" ||
+    typeof passwordField !== "string"
+  ) {
     return {
       error: { field: "general", message: t("invalidFormSubmission") },
     };
@@ -32,7 +38,13 @@ export async function signUp(
 
   const email = emailField.trim();
   const password = passwordField;
+  // Normalised by the same rule the Room applies, so an account's pseudo
+  // can never be one thing on the form and another in the presence overlay.
+  const pseudo = normalizePseudo(pseudoField);
 
+  if (!pseudo) {
+    return { error: { field: "pseudo", message: t("pseudoRequired") } };
+  }
   if (!email) {
     return { error: { field: "email", message: t("emailRequired") } };
   }
@@ -46,7 +58,14 @@ export async function signUp(
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  // Carried in `user_metadata` rather than in a table of our own: it is the
+  // only thing we know about the person, it belongs to the account, and a
+  // `participant` table is Story 4.2/4.4's decision to make, not this one's.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { pseudo } },
+  });
 
   if (error) {
     const field = classifySignUpError(error.message);

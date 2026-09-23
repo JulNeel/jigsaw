@@ -1,10 +1,14 @@
 /**
  * Who a Participant is, as far as anyone else in the Room can see.
  *
- * Deliberately nothing to do with the `auth` account. Sign-up collects an
- * email and a password and nothing else, so a registered Participant has no
- * display name either — and an email must never be shown to strangers in a
- * shared Room. Everyone gets the same treatment: a name they chose, or none.
+ * Deliberately never the `auth` account's email — that must not be shown to
+ * strangers in a shared Room, whoever they are.
+ *
+ * Sign-up does collect a pseudo (2026-09-23), and for a registered
+ * Participant that is the name used: `RoomView` prefers it and never opens
+ * the prompt. What lives here is the other half — the Guest who has no
+ * account, and the registered Participant who signed up before the field
+ * existed.
  *
  * Mirrors `tutorial-seen.ts`'s contract exactly — injected storage, `null`
  * meaning "unavailable", and never throwing — for the reason that file
@@ -19,9 +23,12 @@
 const NAME_KEY = "jigsaw:display-name";
 const ID_KEY = "jigsaw:participant-id";
 
-// Long enough for a real first name, short enough that one Participant
-// cannot push everyone else off the overlay.
-const MAX_NAME_LENGTH = 24;
+// Long enough for a real pseudonym, short enough that one Participant
+// cannot push everyone else off the overlay. Exported because sign-up
+// validates the same value under the same rule — two independent caps
+// would mean an account whose pseudo is silently truncated the first time
+// it is displayed.
+export const MAX_PSEUDO_LENGTH = 24;
 
 export type SimpleStorage = Pick<Storage, "getItem" | "setItem">;
 
@@ -30,14 +37,14 @@ export function loadDisplayName(storage: SimpleStorage | null): string | null {
     return null;
   }
   try {
-    return normalizeDisplayName(storage.getItem(NAME_KEY));
+    return normalizePseudo(storage.getItem(NAME_KEY));
   } catch {
     return null;
   }
 }
 
 export function saveDisplayName(name: string, storage: SimpleStorage | null): void {
-  const normalized = normalizeDisplayName(name);
+  const normalized = normalizePseudo(name);
   try {
     // A blank entry is "no name", not a name made of spaces — storing it
     // would make the prompt think it had already been answered.
@@ -47,9 +54,18 @@ export function saveDisplayName(name: string, storage: SimpleStorage | null): vo
   }
 }
 
-function normalizeDisplayName(raw: string | null): string | null {
+/**
+ * The one rule for what a pseudo is, wherever it comes from.
+ *
+ * Shared with the sign-up Server Action rather than reimplemented there:
+ * a pseudo typed into the account form and a pseudo typed into the Room
+ * prompt end up in the same overlay and must survive the same way.
+ * `null` means "nothing usable here", never an error — a blank entry is an
+ * absence, not a failure.
+ */
+export function normalizePseudo(raw: string | null | undefined): string | null {
   const trimmed = (raw ?? "").trim();
-  return trimmed.length === 0 ? null : trimmed.slice(0, MAX_NAME_LENGTH);
+  return trimmed.length === 0 ? null : trimmed.slice(0, MAX_PSEUDO_LENGTH);
 }
 
 /** A plausible `crypto.randomUUID()`, and nothing else. */

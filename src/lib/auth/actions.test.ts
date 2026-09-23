@@ -24,6 +24,7 @@ import { createClient } from "@/lib/auth/supabase-server";
 import { signIn, signUp } from "./actions";
 
 const t = authMessages.Auth;
+const VALID_PSEUDO = "Julien";
 
 function formDataWith(entries: Record<string, FormDataEntryValue>) {
   const formData = new FormData();
@@ -37,7 +38,7 @@ describe("signUp validation", () => {
   it("rejects a missing email", async () => {
     const result = await signUp(
       {},
-      formDataWith({ email: "", password: "password123" }),
+      formDataWith({ pseudo: VALID_PSEUDO, email: "", password: "password123" }),
     );
     expect(result.error).toEqual({
       field: "email",
@@ -48,7 +49,7 @@ describe("signUp validation", () => {
   it("rejects a malformed email", async () => {
     const result = await signUp(
       {},
-      formDataWith({ email: "not-an-email", password: "password123" }),
+      formDataWith({ pseudo: VALID_PSEUDO, email: "not-an-email", password: "password123" }),
     );
     expect(result.error).toEqual({
       field: "email",
@@ -59,7 +60,7 @@ describe("signUp validation", () => {
   it("trims whitespace before validating email format", async () => {
     const result = await signUp(
       {},
-      formDataWith({ email: "  not-an-email  ", password: "password123" }),
+      formDataWith({ pseudo: VALID_PSEUDO, email: "  not-an-email  ", password: "password123" }),
     );
     expect(result.error?.field).toBe("email");
   });
@@ -67,7 +68,7 @@ describe("signUp validation", () => {
   it("rejects a missing password", async () => {
     const result = await signUp(
       {},
-      formDataWith({ email: "user@example.com", password: "" }),
+      formDataWith({ pseudo: VALID_PSEUDO, email: "user@example.com", password: "" }),
     );
     expect(result.error).toEqual({
       field: "password",
@@ -75,8 +76,38 @@ describe("signUp validation", () => {
     });
   });
 
+  it("rejects a missing pseudo", async () => {
+    const result = await signUp(
+      {},
+      formDataWith({ pseudo: "", email: "user@example.com", password: "password123" }),
+    );
+    expect(result.error).toEqual({
+      field: "pseudo",
+      message: t.pseudoRequired,
+    });
+  });
+
+  it("rejects a pseudo made only of whitespace", async () => {
+    // Stored as-is it would look like a name, render as nothing, and leave
+    // an unlabelled avatar in everyone else's overlay.
+    const result = await signUp(
+      {},
+      formDataWith({ pseudo: "   ", email: "user@example.com", password: "password123" }),
+    );
+    expect(result.error?.field).toBe("pseudo");
+  });
+
+  it("checks the pseudo before the email, so the first field asked for is the first reported", async () => {
+    const result = await signUp(
+      {},
+      formDataWith({ pseudo: "", email: "", password: "" }),
+    );
+    expect(result.error?.field).toBe("pseudo");
+  });
+
   it("rejects a non-string form field (e.g. a File)", async () => {
     const formData = new FormData();
+    formData.set("pseudo", VALID_PSEUDO);
     formData.set("email", new Blob(["x"]), "file.txt");
     formData.set("password", "password123");
 

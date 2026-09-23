@@ -121,6 +121,15 @@ Claude Opus 5
 - **Harness debt, as predicted, and it was all four entry points.** The fixture plus the three specs that build their own `BrowserContext` for `routeWebSocket` all needed the name seeded; missing one fails on a blocked click.
 - **`e2e/move-rejection.e2e.ts` failed once across eleven full runs during this work** (~9%), with the same signature as the flake declared resolved on 2026-09-22. That "resolved" was called on ten consecutive green runs, which at this rate happen 39% of the time by chance. `deferred-work.md` has been corrected and the item reopened. This story's presence work cannot be cleanly exonerated, though the signature points at the gesture rather than at the channel.
 
+### Completion Notes — pseudo at sign-up (2026-09-23, user request)
+
+- **Sign-up now collects a pseudo**, carried in `user_metadata` rather than in a table of our own: it is the only thing the app knows about the person, it belongs to the account, and a `participant` table is Story 4.2/4.4's decision to make.
+- **`RoomView` prefers it over anything this browser remembers**, and never opens the prompt for a Participant who has one. The prompt now covers exactly two cases: a Guest, and someone who signed up before the field existed.
+- **The rule for "what a pseudo is" is shared, not duplicated.** `normalizePseudo` and `MAX_PSEUDO_LENGTH` live in `participant-identity.ts` and the Server Action imports them. Two independent caps would mean an account whose pseudo is silently truncated the first time it is displayed.
+- Terminology settled on *pseudo* throughout, including the in-Room prompt, which previously said "prénom".
+- **A mistake worth recording, caught by the existing tests.** The edit that added the pseudo guard to `signUp` also landed in `signIn`, which has a byte-identical field-reading block — `signIn` began demanding a pseudo nobody was sending, and rejected every sign-in as a malformed submission. Seven pre-existing tests failed immediately and named it precisely. Nothing about this was caught by types.
+- No e2e for the sign-up flow, deliberately: the harness never writes to `auth.users`, and that rule is worth more than the coverage.
+
 ### File List
 
 - `src/lib/rooms/participant-identity.ts` (new, + test) — name, id and colour, mirroring `tutorial-seen.ts`'s storage contract.
@@ -129,6 +138,7 @@ Claude Opus 5
 - `src/components/room/name-prompt.tsx` (new), `src/components/room/presence-overlay.tsx` (new).
 - `src/lib/db/collections.ts` (modified) — presence on the existing channel, the `.subscribe()` callback and its warning, `reportActivity` from `onUpdate`.
 - `src/components/canvas/room-canvas.tsx`, `src/components/room/room-view.tsx`, `src/components/room/first-access-tutorial.tsx`, `messages/fr.json` (modified).
+- `src/lib/auth/actions.ts`, `src/app/sign-in/sign-up-form.tsx`, `src/lib/auth/actions.test.ts`, `src/app/room/[id]/page.tsx` (modified, 2026-09-23) — the pseudo at sign-up.
 - `e2e/presence.e2e.ts` (new); `e2e/support/fixtures.ts`, `e2e/support/drag.ts`, `e2e/realtime-gap.e2e.ts`, `e2e/cluster-lock-in.e2e.ts`, `e2e/out-of-order-events.e2e.ts` (modified).
 
 ## Change Log
@@ -136,4 +146,5 @@ Claude Opus 5
 | Date | Change |
 |------|--------|
 | 2026-09-23 | **AC amended after the first draft, at the user's decision: the activity window goes from 30 seconds to 5 minutes**, in this story and in `epics.md` where the AC originates. The draft had flagged 30s as answering "who is working" rather than "who is here", which contradicts the story's own purpose. Added AC #2b in the same pass, because the change exposed that the two ways of disappearing are different mechanisms: a real departure is a presence `leave` and is immediate, so the window only ever governs an idle-but-connected Participant. Lengthening it risks a stale entry, never a ghost. |
+| 2026-09-23 | Sign-up collects a pseudo (user request), stored in `user_metadata`; a registered Participant is never asked again in a Room. The validation rule is shared with the Room prompt rather than duplicated. |
 | 2026-09-23 | Story created. Three scope decisions taken with the user first: ask for a first name on entry (over an auto-generated pseudonym), ephemeral presence with no persistence (4.2/4.4 will define their own model), and this document before implementation. Verified while writing rather than assumed: Presence is available on the installed `realtime-js` 2.112.2 and rides the existing channel (so NFR5 holds structurally); the app has no display-name concept at all, so the prompt applies to registered Participants too; and a new first-load gate will break all four e2e entry points unless they are updated together. |

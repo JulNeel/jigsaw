@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Field, fieldErrorId } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { signUp, type SignUpState } from "@/lib/auth/actions";
+import { MAX_PSEUDO_LENGTH } from "@/lib/rooms/participant-identity";
 
 const initialState: SignUpState = {};
 
@@ -18,6 +19,28 @@ export function SignUpForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {/* First, and deliberately: it is the only field the other people in
+          a Room will ever see, and asking for it before the credentials
+          reads as an introduction rather than as paperwork. */}
+      <Field
+        label={t("pseudoLabel")}
+        htmlFor="sign-up-pseudo"
+        error={state.error?.field === "pseudo" ? state.error.message : undefined}
+      >
+        <Input
+          id="sign-up-pseudo"
+          name="pseudo"
+          type="text"
+          required
+          maxLength={MAX_PSEUDO_LENGTH}
+          autoComplete="nickname"
+          aria-describedby={
+            state.error?.field === "pseudo" ? fieldErrorId("sign-up-pseudo") : undefined
+          }
+          aria-invalid={state.error?.field === "pseudo" || undefined}
+        />
+      </Field>
+
       <Field
         label={t("emailLabel")}
         htmlFor="sign-up-email"

@@ -1,5 +1,7 @@
 {
   "Auth": {
+    "pseudoLabel": "Pseudo",
+    "pseudoRequired": "Choisissez un pseudo — c'est le nom que les autres participants verront.",
     "emailLabel": "Email",
     "passwordLabel": "Mot de passe",
     "emailRequired": "L'email est requis.",
@@ -119,10 +121,10 @@
     "anonymous": "Invité",
     "arrived": "{name} a rejoint le salon.",
     "left": "{name} a quitté le salon.",
-    "promptTitle": "Comment vous appelle-t-on ?",
-    "promptDescription": "Votre prénom s'affichera aux autres participants pendant que vous jouez. Vous pouvez aussi rester anonyme.",
-    "promptInputAriaLabel": "Votre prénom",
-    "promptPlaceholder": "Votre prénom",
+    "promptTitle": "Quel est votre pseudo ?",
+    "promptDescription": "Il s'affichera aux autres participants pendant que vous jouez. Vous pouvez aussi rester anonyme.",
+    "promptInputAriaLabel": "Votre pseudo",
+    "promptPlaceholder": "Votre pseudo",
     "promptConfirm": "C'est parti",
     "promptSkip": "Rester anonyme"
   }

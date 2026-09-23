@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   PARTICIPANT_COLORS,
+  MAX_PSEUDO_LENGTH,
   colorForParticipant,
   getSafeLocalStorage,
   loadDisplayName,
+  normalizePseudo,
   loadOrCreateParticipantId,
   saveDisplayName,
   type SimpleStorage,
@@ -77,6 +79,26 @@ describe("display name", () => {
     expect(() => loadDisplayName(storage)).not.toThrow();
     expect(loadDisplayName(storage)).toBeNull();
     expect(() => saveDisplayName("Julien", storage)).not.toThrow();
+  });
+});
+
+describe("normalizePseudo", () => {
+  // The one rule, shared with the sign-up Server Action. Tested here rather
+  // than in both places so the two cannot drift: an account pseudo and a
+  // Room pseudo land in the same overlay.
+  it("trims", () => {
+    expect(normalizePseudo("  Julien  ")).toBe("Julien");
+  });
+
+  it("treats blank and absent alike", () => {
+    expect(normalizePseudo("   ")).toBeNull();
+    expect(normalizePseudo("")).toBeNull();
+    expect(normalizePseudo(null)).toBeNull();
+    expect(normalizePseudo(undefined)).toBeNull();
+  });
+
+  it("caps at the shared length", () => {
+    expect(normalizePseudo("x".repeat(100))).toHaveLength(MAX_PSEUDO_LENGTH);
   });
 });
 

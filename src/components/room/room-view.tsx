@@ -58,10 +58,13 @@ export function RoomView({
   room,
   roomSlug,
   isGuest,
+  accountPseudo,
 }: {
   room: RoomDetail;
   roomSlug: string;
   isGuest: boolean;
+  /** Chosen at sign-up. Present means never asking again in a Room. */
+  accountPseudo: string | null;
 }) {
   const [canvasReady, setCanvasReady] = useState(false);
   const canvasRef = useRef<RoomCanvasHandle>(null);
@@ -80,9 +83,18 @@ export function RoomView({
   const [tutorialResolved, setTutorialResolved] = useState(!isGuest);
   const handleTutorialResolved = useCallback(() => setTutorialResolved(true), []);
 
-  const displayName = chosenName !== undefined ? chosenName : storedName;
+  // An account's pseudo wins over anything this browser remembers: it is the
+  // one the person deliberately chose for themselves, and it follows them to
+  // any device. A locally-stored name is what a Guest has instead — and what
+  // a Participant who signed up before the field existed still has.
+  const displayName =
+    accountPseudo ?? (chosenName !== undefined ? chosenName : storedName);
   const namePromptOpen =
-    canvasReady && tutorialResolved && chosenName === undefined && !storedName;
+    canvasReady &&
+    tutorialResolved &&
+    !accountPseudo &&
+    chosenName === undefined &&
+    !storedName;
 
   return (
     <>
