@@ -61,10 +61,23 @@ test("two true neighbours turned the wrong way are refused, and say so", async (
   // them — ending the test mid-transaction deadlocks the cleanup.
   expect(await waitForDbVersionAbove(movingId, 0)).not.toBeNull();
 
+  // Scoped to the toast itself rather than any element containing the text:
+  // the same wording also lands in the `aria-live` region, and a bare text
+  // match would pass on that alone even if no toast ever appeared.
+  const hint = page.locator("[data-sonner-toast]").filter({ hasText: HINT });
   await expect(
-    page.getByText(HINT).first(),
+    hint,
     "the drop was refused with nothing to distinguish it from a drop against an unrelated piece",
   ).toBeVisible({ timeout: 5_000 });
+  // It has to *read* as a caution, which is the whole point of raising it.
+  // The amber itself comes from `richColors` plus the `--warning-*` tokens
+  // and is a design value, not asserted here — this pins the type that
+  // selects it.
+  await expect(hint).toHaveAttribute("data-type", "warning");
+  // And sit under the canvas rather than off in a corner, away from the
+  // gesture it is explaining.
+  await expect(page.locator("[data-sonner-toaster]")).toHaveAttribute("data-y-position", "bottom");
+  await expect(page.locator("[data-sonner-toaster]")).toHaveAttribute("data-x-position", "center");
 
   // The rule itself is unchanged: rotated pieces still do not fuse.
   const moved = await readPiece(movingId);
@@ -101,5 +114,5 @@ test("a drop against a piece that is no neighbour at all stays silent", async ({
   // also keeps the row unlocked for the fixture's own cleanup.
   expect(await waitForDbVersionAbove(movingId, 0)).not.toBeNull();
 
-  await expect(page.getByText(HINT)).toHaveCount(0);
+  await expect(page.locator("[data-sonner-toast]").filter({ hasText: HINT })).toHaveCount(0);
 });

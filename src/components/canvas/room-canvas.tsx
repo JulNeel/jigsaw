@@ -1400,7 +1400,7 @@ export function RoomCanvas({ room, onReady, ref, highlightFramePieces }: RoomCan
   // stack three copies of it.
   const announceMisorientedContact = useCallback(() => {
     const message = t("misorientedContactMessage");
-    toast(message, { id: "misoriented-contact" });
+    toast.warning(message, { id: "misoriented-contact" });
     announce(message);
   }, [t]);
 
