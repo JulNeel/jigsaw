@@ -16,6 +16,26 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Checks
+
+Every pull request runs `.github/workflows/ci.yml`: lint, `tsc --noEmit`,
+the unit tests, and a production build. The build gets placeholder
+environment values, not secrets — nothing is deployed from CI, and
+`DATABASE_URL` only has to exist, because `src/lib/db/pg.ts` builds its pool
+at module scope.
+
+The end-to-end suite is **not** in CI and should not be:
+
+```bash
+E2E_ALLOW_HOSTED_DB=1 pnpm e2e
+```
+
+It drives a real browser against a real `next dev`, and it seeds and deletes
+rows in the hosted Supabase project `DATABASE_URL` points at — there is no
+local stack. Every room it creates is prefixed `e2e-` and removed afterwards,
+but running it is a deliberate act, which is what the environment variable is
+for. See `.env.example`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

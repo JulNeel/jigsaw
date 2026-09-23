@@ -1,0 +1,70 @@
+name: CI
+
+# Every pull request, whatever it targets, plus `main` itself so a merge
+# commit is checked as a whole and not only as the sum of its branches.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to the same branch makes the previous run pointless; cancel it
+# rather than queue behind it. `main` is excluded from cancellation by the
+# ref-based group naturally being unique per branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint, types, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # NOT run here: `pnpm e2e`. The end-to-end suite seeds and deletes rows
+    # in the maintainer's real hosted Supabase project — there is no local
+    # stack — so it needs real credentials and writes to real data. Putting
+    # it behind an automatic trigger would mean every pull request, from
+    # anyone, writing to that project. It stays a deliberate local command,
+    # and `E2E_ALLOW_HOSTED_DB=1` guards it besides. See `.env.example`.
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before setup-node, which needs pnpm on PATH to resolve its cache.
+      # No version pinned here on purpose: the action reads `packageManager`
+      # from package.json, so the lockfile and CI cannot drift apart.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # `--frozen-lockfile` is the point of running this at all: an install
+      # that silently updates the lockfile would test something other than
+      # what the pull request contains.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      # `next build` type-checks too, but only after a full compile, and it
+      # is the slowest step here. Running tsc first fails a type error in
+      # seconds instead of minutes, and covers `e2e/` as well, which the
+      # build never looks at.
+      - run: pnpm exec tsc --noEmit
+
+      - run: pnpm test
+
+      - name: Build
+        # Placeholders, not secrets, and deliberately so: nothing here is
+        # deployed, and the build only needs these to *exist*. `DATABASE_URL`
+        # is the one hard requirement — `src/lib/db/pg.ts` builds its pool at
+        # module scope and throws without it — and `new Pool()` never opens a
+        # connection, so an unreachable host is fine. The two public Supabase
+        # values are inlined into the client bundle at build time; absent,
+        # the build still succeeds, and they are set only so the bundle that
+        # gets type-checked is shaped like the real one.
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+        run: pnpm build
