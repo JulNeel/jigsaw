@@ -584,9 +584,10 @@ So that the Room feels like a shared, lived-in space rather than a static docume
 **Acceptance Criteria:**
 
 **Given** a Room with several Participants who have interacted recently
-**When** any of them has had activity within the last 30 seconds
+**When** any of them has had activity within the last 5 minutes
 **Then** they appear in the live presence list/avatars overlay
-**And** a Participant with no activity for more than 30 seconds disappears from the list
+**And** a Participant with no activity for more than 5 minutes disappears from the list
+**And** a Participant who actually leaves (closes the tab, loses the connection) disappears immediately, without waiting out that window
 **And** presence updates are announced via an `aria-live="polite"` region for screen-reader users, decoupled from Canvas manipulation
 **And** presence is carried by the same synchronization channel as the rest of the Room's shared state — no separate real-time channel is introduced (NFR5)
 
