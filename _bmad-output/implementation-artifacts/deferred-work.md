@@ -1,11 +1,102 @@
 # Deferred Work
 
+## Where this stands — triage of 2026-09-23
+
+Twenty-seven stories' worth of deferrals had accumulated here with no state
+beyond "written down once". Every item below was re-read and **checked against
+the code as it stands**, not taken on trust: a dozen had been quietly settled
+by later work and were still sitting here as open debt, and two describe
+modules that no longer exist.
+
+Nothing was deleted. The per-story sections below keep their provenance and
+their original wording; settled items are annotated in place, so the reasoning
+that produced them survives even when the item does not.
+
+### Settled or moot — 12 items, no action
+
+`.github` CI · bilingual copy · ElectricSQL provisioning (abandoned for a
+custom sync) · Guest read access to tiles (signed URLs) · pushing overlapping
+pieces aside (the burial rule was deleted instead) · Cluster lock-in having no
+optimistic feedback (Story 3.19) · the stuck placement pulse (per-pulse token)
+· `awaitVersion` reverting a successful write with no way back (`resyncRoom`)
+· the celebration lost to a dropped message (same) · `#A8541F` duplication ·
+`nearestFrameSlot`'s silent tie-break (function gone) · the `move-rejection`
+flake.
+
+### Open, heaviest first
+
+**Security — the only group with real exposure.** Two of these are one
+concern seen from both ends and should be fixed together:
+
+- `piece-tiles` **upload** policy scopes by bucket only: any authenticated
+  user can write into any Room's folder given its UUID (Story 2.4 review).
+- `storage.objects` **SELECT** policy likewise: anyone holding a tile path can
+  mint a signed URL for it without ever knowing that Room's invite slug
+  (Story 3.1 review).
+- `room`/`piece`/`piece_adjacency` RLS use `using (true)`. Harmless only
+  because the Data API is off — still returning `PGRST002` as of 2026-09-20.
+  **This is one dashboard toggle away from making every Room enumerable.**
+- No rate limiting on sign-up, nor on `getRoomBySlug` (public, unauthenticated,
+  unthrottled).
+- Sign-in has a plausible timing side-channel distinguishing known from
+  unknown accounts.
+
+**Robustness.** The first is the one a player would actually notice:
+
+- **A fusion is invisible to everyone except the player who made it.**
+  `clusterHandler` emits nothing, so other Participants get no sound, no
+  pulse, no announcement — verified still true on 2026-09-23. Frame placement
+  has had a confirmed broadcast since Story 3.6; fusion never got one.
+- **No `error.tsx` anywhere** — verified: `find src/app -name error.tsx`
+  returns nothing. Noted when the routes were placeholders; they now hold
+  every Server Action in the app.
+- `SoloPieceSprite.handleDragStart` depends on an undocumented Konva internal
+  (`_listenDrag`) with no test protecting the behaviour it guards.
+- `draggingKey` can stick non-null if a dragged item vanishes mid-gesture,
+  leaving Stage panning disabled.
+- The piece-`DELETE` handler never resolves a pending `awaitVersion`
+  (unreachable today — nothing deletes a piece).
+- `onUpdate` infers intent from whether `placedRow` changed; a second call
+  site setting it for another reason would misroute silently.
+
+**Architecture — known limits, each needing a decision rather than a patch:**
+
+- `onUpdate` reads only `transaction.mutations[0]`, so one optimistic row
+  update costs one Server Action. `createTransaction` is used nowhere.
+- An optimistic Îlot prediction is invisible to the test hook by construction.
+- Whole-Frame re-orientation, never built (user-requested 2026-08-27).
+- Rooms cut before 2026-09-03 can never show outward tabs.
+
+**Performance** — neighbour lookup per contact · `pg.Pool` untuned · signed
+URLs re-minted every page load · no `ResizeObserver`, and `measure()`
+re-renders on every resize event.
+
+**Accessibility** — no keyboard pan/zoom path · recenter has neither
+`aria-live` nor tooltip · shadcn's `dialog.tsx` ships English strings into a
+French-only app. Worth one pass together rather than three patches.
+
+**UX polish** — recenter snaps instead of animating (user asked) · wheel zoom
+ignores `deltaY` magnitude · square bounding box over-constrains non-square
+Rooms · tutorial key has no version segment and re-shows per tab · no
+`?next=` redirect-back through sign-in · Home still shows a gradient for
+upload-sourced Rooms although Story 3.14 now persists a usable
+`reference.webp` (verified: `room-list.tsx` does not read it).
+
+### Not debt — history
+
+The 2026-09-04/05 entries under Story 3.6's second review, and the two
+2026-09-21 entries, are **records of fixes already made**, kept for the
+reasoning they carry. They are not owed work, and should not be counted as
+such when reading this file.
+
+---
+
 ## Deferred from: code review of story-1-1-project-bootstrap (2026-08-09)
 
 - `.dark` block never updates `--brand-accent`, so its contrast against dark backgrounds is unverified (`src/app/globals.css`) — dark mode is explicitly out of scope for V1 (DESIGN.md assumption), nothing consumes `.dark` yet.
 - No code-level guard (e.g. `server-only` import) stops `SUPABASE_SECRET_KEY` from being imported into client code by accident — the network-gateway rejection is the only current protection. No file in this diff actually imports the secret key yet; establish the guard convention when the first Server Action does.
 - No `error.tsx` boundary exists for `room/[id]` (or the other route segments) — low risk for a static placeholder with no real logic yet.
-- ElectricSQL sync engine provisioning — decided: **Electric Cloud** (managed), not self-hosted. Deferred to Epic 3 (where real-time sync first becomes load-bearing) rather than provisioning another account/service now. When picked up: create the Electric Cloud project, add `ELECTRIC_URL`/token to `.env.example` and Vercel env vars, and wire `src/lib/db/collections.ts` to actually use `@tanstack/electric-db-collection`.
+- **SETTLED (verified 2026-09-23) — never happened, and won't.** The project runs a fully custom `sync` in `collections.ts`; `@tanstack/electric-db-collection` is referenced only in a comment explaining why it was abandoned. Original note: ElectricSQL sync engine provisioning — decided: **Electric Cloud** (managed), not self-hosted. Deferred to Epic 3 (where real-time sync first becomes load-bearing) rather than provisioning another account/service now. When picked up: create the Electric Cloud project, add `ELECTRIC_URL`/token to `.env.example` and Vercel env vars, and wire `src/lib/db/collections.ts` to actually use `@tanstack/electric-db-collection`.
 - ~~No CI/automated gate (lint/build/test) enforces anything going forward — nothing in `.github/` runs on this repo yet.~~ — **RESOLVED 2026-09-23**: `.github/workflows/ci.yml` runs lint, `tsc --noEmit`, the unit tests and a production build on every pull request and on `main`. Deliberately left out of it: `pnpm e2e`, which seeds and deletes rows in the real hosted Supabase project and so must stay a deliberate local command rather than something every pull request triggers. Held back this long for a good reason — until 2026-09-22 the e2e suite itself failed roughly one full run in three, and a gate people learn to ignore is worse than no gate.
 
 ## Deferred from: code review of story-1-2-sign-up (2026-08-10)
@@ -40,7 +131,7 @@
 
 ## Forward reference noted during story-2-4 creation (2026-08-14)
 
-- Unauthenticated (Guest) read access to `piece-tiles` Storage objects is unsolved — the bucket is private, and Story 2.4 only sets up authenticated INSERT access for the Participant creating the Room. Epic 3 (where Guests first need to actually see tile images) will need to solve this (a Storage read policy, or signed URLs) [supabase Storage: piece-tiles bucket policies]
+- **SETTLED (verified 2026-09-23)** — solved with per-object signed URLs minted server-side (`createSignedUrls` in `get-room-by-slug.ts`). The bucket stayed private. Original note: Unauthenticated (Guest) read access to `piece-tiles` Storage objects is unsolved — the bucket is private, and Story 2.4 only sets up authenticated INSERT access for the Participant creating the Room. Epic 3 (where Guests first need to actually see tile images) will need to solve this (a Storage read policy, or signed URLs) [supabase Storage: piece-tiles bucket policies]
 
 ## Deferred from: code review of story-2-4-create-the-room-and-get-a-shareable-invite-link (2026-08-17)
 
@@ -85,7 +176,7 @@
 
 ## Deferred: push overlapping free pieces aside instead of blocking the lock (2026-08-31, user feedback)
 
-- **Current behavior**: locking a piece/Cluster into the Frame is refused (falls back to resting unplaced) if it would visually overlap a still-loose piece resting nearby — added 2026-08-30 specifically to prevent a locked piece (which never moves again) from permanently burying a loose one. The user found this unintuitive in practice and proposed instead: allow the lock to proceed anyway, and displace ("push aside") whichever loose piece(s)/Cluster(s) it would have overlapped, just enough to clear.
+- **MOOT (verified 2026-09-23) — the rule this was about no longer exists.** Rather than displacing overlapping pieces, the burial problem was removed at the source: locked pieces render beneath everything still in play, so nothing can be buried and nothing needs pushing aside. `validate-overlap.ts` was deleted with its tests (2026-09-20). Original note: **Current behavior**: locking a piece/Cluster into the Frame is refused (falls back to resting unplaced) if it would visually overlap a still-loose piece resting nearby — added 2026-08-30 specifically to prevent a locked piece (which never moves again) from permanently burying a loose one. The user found this unintuitive in practice and proposed instead: allow the lock to proceed anyway, and displace ("push aside") whichever loose piece(s)/Cluster(s) it would have overlapped, just enough to clear.
 - **Assessed as moderate, not hard, complexity** — stays inside the same atomic transaction as the lock itself; displacing a loose piece never needs validation (free repositioning always succeeds, same as `movePiece`'s "no genuine contact" path). Needs: (1) a minimum-translation-vector push per overlapping piece (standard AABB-overlap-resolution technique), (2) pushing the *whole Cluster's anchor* if the overlapping piece belongs to one, not just that one piece, (3) handling more than one overlapping candidate for the same lock. Minor residual risk: a pushed piece could itself end up overlapping a third piece — not a correctness bug (nothing but two loose pieces' pixels touching), just a possible follow-on nudge needed later.
 - **Open design question, not yet decided**: how far to push — minimal (just enough to clear, but could leave pieces very close together) vs. a more generous clearance margin (reduces immediate re-collision risk). User deferred this choice, not the underlying idea — revisit before implementing [src/lib/rooms/piece-actions.ts's `placePiece`, `src/lib/validation/validate-overlap.ts`].
 
@@ -96,14 +187,14 @@
 
 ## Deferred from: code review of story-3-8-group-pieces-into-a-cluster / story-3-9-move-a-cluster-as-a-block (2026-09-01)
 
-- Locking an entire Cluster into the Frame optimistically updates only the representative member's own piece row — the rest of the Cluster's members keep rendering via the still-clustered, unconfirmed Group until each member's own Realtime event lands, so a successful multi-piece lock-in has less immediate visual feedback than a solo piece's. Fixing well means restructuring how a Cluster's members render once part of them are "optimistically placed" (today's split is exactly solo-vs-clustered, no in-between state) — bigger than a targeted patch [src/components/canvas/room-canvas.tsx:ClusterGroupSprite]
+- **SETTLED (verified 2026-09-23)** — this is exactly the gap Story 3.19 was written to close (`predictedClusterLocks`), and its Task 4 was verified against a real browser on 2026-09-21. Original note: Locking an entire Cluster into the Frame optimistically updates only the representative member's own piece row — the rest of the Cluster's members keep rendering via the still-clustered, unconfirmed Group until each member's own Realtime event lands, so a successful multi-piece lock-in has less immediate visual feedback than a solo piece's. Fixing well means restructuring how a Cluster's members render once part of them are "optimistically placed" (today's split is exactly solo-vs-clustered, no in-between state) — bigger than a targeted patch [src/components/canvas/room-canvas.tsx:ClusterGroupSprite]
 - Full deadlock *prevention* (a canonical lock-acquisition ordering shared between `loadDraggedGroup` and `repositionOrFuse`'s touched-piece locking) is bigger than the STALE_WRITE mitigation already applied — the mitigation makes the rare deadlock's failure mode correct (abandon and resync) rather than misleading; full prevention would be optimization on top of an already-safe outcome [src/lib/rooms/piece-actions.ts]
 
 ## Deferred from: code review of story-3-11-instant-client-side-placement-prediction (2026-09-02)
 
-- `justPlacedIds` placement-pulse effect (Story 3.6) can cancel its own pending `setTimeout` without replacing it if an unrelated Realtime `pieces` update arrives mid-pulse (React re-runs the previous cleanup before every effect re-run) — the pulse rect for the just-placed piece can then stay rendered indefinitely, until the next placement anywhere in the Room happens to overwrite the set. Not touched by 3.11 [src/components/canvas/room-canvas.tsx]
-- `awaitVersion`'s 15s timeout (Story 3.5) can falsely "un-place"/revert a piece whose write actually succeeded server-side but whose Realtime confirmation was delayed or dropped — the timeout's rejection is indistinguishable from a genuine failure to `onUpdate`, so the optimistic change rolls back even though the database already has the correct state. No re-fetch/reconciliation path exists to correct this short of another Realtime event for that piece. Not touched by 3.11 [src/lib/db/collections.ts]
-- Placement pulse's hardcoded `#A8541F` (Story 3.6) duplicates the Frame border's own hardcoded stroke color a few lines below, with no shared source of truth for the brand color between Konva-rendered and DOM-rendered surfaces. Not touched by 3.11 [src/components/canvas/room-canvas.tsx]
+- **SETTLED (verified 2026-09-23)** — `justPlacedPulseById` now carries a per-pulse `token`, and a timeout only clears the entry it owns. Original note: `justPlacedIds` placement-pulse effect (Story 3.6) can cancel its own pending `setTimeout` without replacing it if an unrelated Realtime `pieces` update arrives mid-pulse (React re-runs the previous cleanup before every effect re-run) — the pulse rect for the just-placed piece can then stay rendered indefinitely, until the next placement anywhere in the Room happens to overwrite the set. Not touched by 3.11 [src/components/canvas/room-canvas.tsx]
+- **SETTLED (2026-09-20)** — the reconciliation path this asked for exists: `resyncRoom` re-reads the Room through the same write path, and the timeout now repairs before it rejects. Original note: `awaitVersion`'s 15s timeout (Story 3.5) can falsely "un-place"/revert a piece whose write actually succeeded server-side but whose Realtime confirmation was delayed or dropped — the timeout's rejection is indistinguishable from a genuine failure to `onUpdate`, so the optimistic change rolls back even though the database already has the correct state. No re-fetch/reconciliation path exists to correct this short of another Realtime event for that piece. Not touched by 3.11 [src/lib/db/collections.ts]
+- **PARTLY MOOT (verified 2026-09-23)** — `#A8541F` is gone from the codebase and the Frame outline now reads `--frame-outline`. The underlying point survives in a smaller form: the pulse colours are still three hardcoded hex values in `room-canvas.tsx` (`#2E7D32`, `#C62828`, `#8b5cf6`) rather than reads of the palette tokens they were copied from. Original note: Placement pulse's hardcoded `#A8541F` (Story 3.6) duplicates the Frame border's own hardcoded stroke color a few lines below, with no shared source of truth for the brand color between Konva-rendered and DOM-rendered surfaces. Not touched by 3.11 [src/components/canvas/room-canvas.tsx]
 - `pieceRenderPosition`'s comment (Story 3.8) claims its three branches (placed / clustered / free-floating) are mutually exclusive, but a piece whose `clusterId` doesn't (yet) match a loaded `Cluster` row falls through to its own possibly-stale `scatterX`/`scatterY` rather than being excluded from rendering — a one-render sync gap, not a steady-state bug, but the comment overclaims. Not touched by 3.11 [src/components/canvas/room-canvas.tsx]
 - Placement sound/haptic/`aria-live` (Story 3.6) fire as soon as the optimistic mutation snapshot shows a piece placed, before server confirmation — on Story 3.11's rare genuine-conflict case, feedback for a lock that later gets rolled back has already played, with no way to un-play audio. Fixing well means delaying all placement feedback until confirmation, which conflicts with Story 3.6's actual design goal (instant tactile feedback); an accepted architectural tension, not a bug to patch [src/components/canvas/room-canvas.tsx]
 - `repositionOrFuse`'s post-re-lock re-verification query (`touchedResult`, Story 3.5/3.8's TOCTOU-closing patch round) was flagged by the Edge Case Hunter as worth re-verifying against a freshly-narrowed candidate set; not touched by 3.11, no new evidence beyond the existing documented tradeoff [src/lib/rooms/piece-actions.ts]
@@ -112,10 +203,10 @@
 ## Deferred from: code review of story-3-6-placement-feedback (2026-09-02)
 
 - Simultaneous multi-piece placement sounds (a Cluster lock-in) all start at the same `ctx.currentTime` through identical filter/gain envelopes and sum rather than sounding as distinct clicks — can clip audibly for a large lock-in, no limiter in place. Already an accepted tradeoff per this story's own scope decisions ("revisit only if real testing shows a machine-gun burst"); this review confirms the specific clipping-risk mechanism but doesn't change the decision [src/lib/audio/play-tone.ts, src/components/canvas/room-canvas.tsx]
-- `otherFreePiecePositions` can exclude a mid-flight Cluster's own representative member from "free piece" overlap consideration once its `placedRow` is optimistically set, diverging from the server's own (authoritative) check — low impact, since `predictFrameLock`'s result only ever controls a purely cosmetic client-side render override, never the actual outcome [src/components/canvas/room-canvas.tsx]
+- **NEEDS RE-CHECKING (2026-09-23)** — `predictFrameLock` and the overlap rule it fed have both been replaced since (`predictDropOutcome`, and the burial rule deleted), so this may no longer describe anything. Not verified either way. Original note: `otherFreePiecePositions` can exclude a mid-flight Cluster's own representative member from "free piece" overlap consideration once its `placedRow` is optimistically set, diverging from the server's own (authoritative) check — low impact, since `predictFrameLock`'s result only ever controls a purely cosmetic client-side render override, never the actual outcome [src/components/canvas/room-canvas.tsx]
 - `SoloPieceSprite.handleDragStart`'s "self-cancel" for already-placed pieces (Story 3.5) depends on an undocumented Konva internal (`_listenDrag`) continuing to run its own bookkeeping in a specific order relative to this handler's `stopDrag()` call — a Konva upgrade that reorders this could silently reintroduce the "whole canvas pans when a placed piece is touched" bug this code exists to prevent, with no test coverage protecting against that regression [src/components/canvas/room-canvas.tsx]
 - `draggingKey` (Story 3.8/3.9's z-order mechanism) can get stuck non-null if the dragged item vanishes mid-gesture — e.g. another Participant concurrently fuses or dissolves the same piece's Cluster membership while it's being locally dragged — leaving Stage panning disabled until an unrelated re-render happens to clear it [src/components/canvas/room-canvas.tsx]
-- `nearestFrameSlot` (Story 3.5) has an undocumented round-half-up tie-break (`Math.round`) for a drop landing exactly on the boundary between two slot centers — deterministic but silent, no communicated rule for which neighbor wins the tie [src/components/canvas/room-canvas.tsx]
+- **MOOT (verified 2026-09-23)** — `nearestFrameSlot` no longer exists; `findCornerAnchor` deliberately never rounds to a nearest slot, it only asks whether a piece is near *the one slot it belongs to*. Original note: `nearestFrameSlot` (Story 3.5) has an undocumented round-half-up tie-break (`Math.round`) for a drop landing exactly on the boundary between two slot centers — deterministic but silent, no communicated rule for which neighbor wins the tie [src/components/canvas/room-canvas.tsx]
 
 ## Deferred from: second code review of story-3-6-placement-feedback (2026-09-02)
 
@@ -123,14 +214,14 @@
 - **2026-09-04 fix, narrower than the gap above: the *acting* client's own fusion now gets an instant visual pulse, not just a chime.** Previously a genuine fusion only played a sound — nothing visually distinguished it from an ordinary non-fusing drop until the server's confirmed `cluster_id` eventually re-rendered the pair as a `ClusterGroupSprite` (noticeably later). Reuses the exact same green `PlacementPulse` mechanism already used for a confident Frame lock (`onInstantFrameLockOutcome`), triggered at the drop point on `fusionOutcome === "genuine"`, for both `SoloPieceSprite` and `ClusterGroupSprite`'s own fusion branches. Purely cosmetic — does **not** make the newly-fused pair draggable as one unit before confirmation; that remains the unsolved part of the gap above [src/components/canvas/room-canvas.tsx].
 - **A moved-but-not-yet-confirmed piece can no longer falsely reject its own next move/place (fixed 2026-09-04, corrected same day).** `movePiece`/`placePiece` still check `expectedVersion` for genuine cross-Participant conflict detection (per AD-6 — silently overwriting a different Participant's move must still be rejected), but a second move/place fired by the *same* client on the *same* piece before the first's Realtime confirmation landed used to read the same stale `mutation.original.version` the first write already consumed, and got rejected as a false `STALE_WRITE` — the piece visibly couldn't be moved again until the server round-trip completed (rotation had already been fixed the same way for the same reason, 2026-09-03). First fix attempt (`ownLastKnownVersionByPieceId`, recorded *after* a successful response) turned out insufficient — user report: "le correctif... ne semble pas fonctionner" — since two actions fired close enough together race each other independently (each `.update()` call's `onUpdate` starts immediately, not queued behind a prior one), so the second action's `onUpdate` could still read the map before the first's own response had come back. Corrected to advance the floor *speculatively*, the instant the request is dispatched (`expectedVersion + 1`, matching every action's own `version = version + 1` server-side), rolled back if that specific action fails — a genuine conflict from a *different* Participant's confirmed write is still correctly rejected, only the client's own race against itself is patched [src/lib/db/collections.ts].
 - **A piece froze (undraggable, unrotatable) for the whole server round-trip on *any* Frame-slot drop attempt, not just a successful one (fixed 2026-09-05, user report: "reglisser et pivoter [freeze] mais uniquement dans le cadre").** Distinct bug from the version-race fix above. `SoloPieceSprite`'s `isPlaced` read `piece.placedRow != null` directly — `placedRow` is set optimistically on *every* Frame-slot-proximity drop by design (AC #3/AD-2: the server must always get a real chance to lock it in, regardless of what `predictFrameLock` guessed), including attempts already predicted to be rejected. The piece's *visual* position already correctly stayed at the drop point during that window (`pendingRestOverride`/`overridden`, Story 3.11), but `isPlaced` never consulted that same signal, so drag/click stayed disabled for the entire round-trip even when the client already suspected the drop wouldn't stick. `isPlaced` now also excludes the `overridden` window — a predicted-valid lock still freezes immediately (correct, matches the common case), only a predicted-invalid attempt stays interactive throughout [src/components/canvas/room-canvas.tsx].
-- **`predictFusionOutcome`'s neighbor-lookup cost is O(n²) on every non-Frame-slot drop.** `computeTrueNeighborIds`/`computeTrueNeighborsByDirection` (`true-neighbors.ts`) do an `Array.find()` per direction per piece; `predictFusionOutcome` calls this once per piece in `knownPieces` to build its neighbor map. For a Room with hundreds-to-thousands of pieces, this runs synchronously on the main thread on *every* free-space drop, not just Frame-slot ones — a noticeable stall/jank risk at scale, no reported real-world problem yet [src/lib/validation/predict-fusion.ts, src/lib/validation/true-neighbors.ts]
+- **STILL OPEN, restated (verified 2026-09-23)** — `predict-fusion.ts` was replaced by `predict-drop.ts`, and `computeTrueNeighborIds` is now built only when something is actually touching, and only for the *dragged* members rather than every piece in the Room. Much cheaper than described, but still a full scan per dragged member on a contact. Original note: **`predictFusionOutcome`'s neighbor-lookup cost is O(n²) on every non-Frame-slot drop.** `computeTrueNeighborIds`/`computeTrueNeighborsByDirection` (`true-neighbors.ts`) do an `Array.find()` per direction per piece; `predictFusionOutcome` calls this once per piece in `knownPieces` to build its neighbor map. For a Room with hundreds-to-thousands of pieces, this runs synchronously on the main thread on *every* free-space drop, not just Frame-slot ones — a noticeable stall/jank risk at scale, no reported real-world problem yet [src/lib/validation/predict-fusion.ts, src/lib/validation/true-neighbors.ts]
 - **Client-side prediction (`predictFrameLock`/`predictFusionOutcome`) can reflect another Participant's still-optimistic, not-yet-confirmed state.** `otherFreePiecePositions`/`otherFreePieceScreenPositions` read straight from the live TanStack DB collection, which doesn't distinguish "confirmed" from "another client's own unconfirmed optimistic write." Since prediction is purely advisory (server always re-validates), this isn't a correctness bug, but a Participant could see an orange "something's in the way" pulse for a slot that, moments later once a remote optimistic write unwinds, was never actually blocked [src/components/canvas/room-canvas.tsx]
 - **A repeatedly-dragged Cluster visibly "replayed" through every intermediate position afterward (fixed 2026-09-05, user report).** Story 3.10's own `optimisticAnchor` fix (2026-09-04) compared the representative member's live `scatterX`/`scatterY` against the *latest* drag's expected value, to detect a rejected write despite `cluster.version` never bumping on rejection. Side effect: dragging the *same* Cluster several times in quick succession made each *earlier*, already-superseded drag's own confirmed row — arriving via Realtime completely normally, not a failure — briefly fail that same comparison (different scatter values than the latest drag's), falling back to the stale-intermediate confirmed anchor for a frame each time, in sequence, as each of the several commits' confirmations trickled in. Replaced the data-comparison guess with an explicit signal (`move-conflict-events.ts`'s `emitMoveConflict`/`subscribeMoveConflict`, fired directly from `collections.ts`'s `onUpdate` only when a move actually fails) — `optimisticAnchor` now only distrusts itself in response to a real, specific rejection, never an unrelated intermediate confirmation [src/lib/db/collections.ts, src/components/canvas/room-canvas.tsx, src/lib/rooms/move-conflict-events.ts].
 - **Same "replay" symptom resurfaced one level up, through the *version* comparison itself (fixed 2026-09-05, same day, second user report).** The scatter-comparison fix above left `sinceVersion` still read straight from `cluster.version` at drag-end — which stays stale across several rapid drags fired before the first one's own confirmation lands, so every one of them captured the *same* stale `sinceVersion`. The first of several confirmations to arrive (for the *earliest*, already-superseded drag) then satisfied the "newer version confirmed" check prematurely, falling back to that earlier drag's own confirmed anchor and replaying through each intermediate position again — the exact same bug class, one abstraction level up. Fixed with `speculativeVersionRef` (`ClusterGroupSprite`), mirroring `collections.ts`'s own `ownLastKnownVersionByPieceId`: advances the floor the instant each drag is *dispatched*, so `sinceVersion` always reflects what *this specific* drag's own write will produce, not whatever the client happened to have last seen confirmed [src/components/canvas/room-canvas.tsx].
 
 ## Deferred from: code review of story-3-7-celebrate-a-completed-frame (2026-09-03)
 
-- **A dropped/delayed Realtime message can permanently deny one client the celebration.** `confirmedPlacedCount` only ever increments from a live Realtime `placedRow` transition (`collections.ts`); if that message never arrives for a particular client (brief disconnect, dropped frame — the same pre-existing Realtime-reliability gap already accepted for per-piece feedback in Story 3.6/3.11's deferred items), that client's local count permanently undercounts and `shouldFireFrameComplete` never returns true for them, even though the Frame is genuinely complete for everyone else. Unlike the per-piece case, there is **no self-correction**: no later event ever retriggers this specific check for that client once the moment has passed — they simply never see the celebration, with no visible sign anything was missed. Proper fix needs a reconciliation/re-fetch mechanism for the whole Realtime layer, out of scope for a single story [src/lib/db/collections.ts].
+- **SETTLED (2026-09-20) — the "no self-correction" part is what changed.** `resyncRoom` folds re-read rows through `writePieceRow`, which is where `confirmedPlacedCount` and `shouldFireFrameComplete` live, so a missed placement is recounted and the celebration can still fire on the next reconciliation (a rejected write, or the tab regaining focus). It is no longer permanent, though it is no longer instant either. Original note: **A dropped/delayed Realtime message can permanently deny one client the celebration.** `confirmedPlacedCount` only ever increments from a live Realtime `placedRow` transition (`collections.ts`); if that message never arrives for a particular client (brief disconnect, dropped frame — the same pre-existing Realtime-reliability gap already accepted for per-piece feedback in Story 3.6/3.11's deferred items), that client's local count permanently undercounts and `shouldFireFrameComplete` never returns true for them, even though the Frame is genuinely complete for everyone else. Unlike the per-piece case, there is **no self-correction**: no later event ever retriggers this specific check for that client once the moment has passed — they simply never see the celebration, with no visible sign anything was missed. Proper fix needs a reconciliation/re-fetch mechanism for the whole Realtime layer, out of scope for a single story [src/lib/db/collections.ts].
 
 ## Deferred from: story-3-12-real-puzzle-piece-cut-shape (2026-09-03)
 
