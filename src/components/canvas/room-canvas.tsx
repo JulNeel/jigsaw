@@ -19,6 +19,8 @@ import type { RoomDetail, RoomDetailCluster, RoomDetailPiece } from "@/lib/rooms
 import { createRoomCollections } from "@/lib/db/collections";
 import { usePresence } from "@/lib/rooms/use-presence";
 import { PresenceOverlay } from "@/components/room/presence-overlay";
+import { useContributions } from "@/lib/rooms/use-contributions";
+import { ContributorHistory } from "@/components/room/contributor-history";
 import { markPredictedLock, subscribePlacementConflict } from "@/lib/rooms/placement-conflict-events";
 import { subscribeMoveConflict } from "@/lib/rooms/move-conflict-events";
 import {
@@ -1216,11 +1218,16 @@ export function RoomCanvas({
       }),
     };
   }
-  const { pieceCollection, clusterCollection, presence } = collectionsRef.current.collections;
+  const { pieceCollection, clusterCollection, presence, contributions } =
+    collectionsRef.current.collections;
   // Story 4.1. Lives here rather than in `RoomView` because this is where
   // the Room's single Realtime channel is owned (AD-1) — the presence API
   // is the only thing `createRoomCollections` exposes of it, deliberately.
   const presentParticipants = usePresence(presence, participantId, displayName);
+  // Story 4.2. Same reason as presence: this is where the Room's single
+  // Realtime channel is owned, and `contributions` is the only part of it
+  // exposed.
+  const history = useContributions(contributions, room.id);
   const collection = pieceCollection;
   const { data: livePieces } = useLiveQuery(
     (q) => q.from({ pieces: pieceCollection }),
@@ -2315,6 +2322,12 @@ export function RoomCanvas({
           one above (AC #3): presence changes must not compete with piece
           placements for the same announcement channel. */}
       <PresenceOverlay participants={presentParticipants} />
+      <ContributorHistory
+        rows={history.rows}
+        hasMore={history.hasMore}
+        loading={history.loading}
+        onLoadMore={history.loadMore}
+      />
     </div>
   );
 }

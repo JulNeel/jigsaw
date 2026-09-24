@@ -127,5 +127,17 @@
     "promptPlaceholder": "Votre pseudo",
     "promptConfirm": "C'est parti",
     "promptSkip": "Rester anonyme"
+  },
+  "History": {
+    "openAriaLabel": "Voir l'historique des contributions",
+    "title": "Historique",
+    "subtitle": "Qui a contribué à ce salon, et quand.",
+    "anonymous": "Invité",
+    "placedLine": "{name} a placé une pièce",
+    "fusedLine": "{name} a assemblé des pièces",
+    "emptyTitle": "Rien encore",
+    "emptyBody": "Les contributions apparaîtront ici au fur et à mesure que le puzzle avance.",
+    "loadMore": "Voir plus",
+    "loading": "Chargement…"
   }
 }

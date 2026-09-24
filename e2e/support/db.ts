@@ -163,6 +163,26 @@ export async function waitForClusterVersionAbove(
   }
 }
 
+export type ContributionRow = {
+  id: string;
+  piece_id: string;
+  kind: string;
+  user_id: string | null;
+  guest_participant_id: string | null;
+  pseudo: string | null;
+  created_at: Date;
+};
+
+/** A Room's history, oldest first — the order it was written in. */
+export async function readContributions(roomId: string): Promise<ContributionRow[]> {
+  const result = await getPool().query<ContributionRow>(
+    `select id, piece_id, kind, user_id, guest_participant_id, pseudo, created_at
+     from contribution where room_id = $1 order by created_at asc, id asc`,
+    [roomId],
+  );
+  return result.rows;
+}
+
 export async function countClusters(roomId: string): Promise<number> {
   const result = await getPool().query<{ count: string }>(
     `select count(*)::text as count from cluster where room_id = $1`,

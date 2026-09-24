@@ -260,6 +260,14 @@ export function createRoomCollections({
   let channelJoined = false;
   const presenceListeners = new Set<() => void>();
 
+  // Story 4.2 — the Room's history is append-only, so it needs none of the
+  // machinery the piece and cluster collections carry. There is no update to
+  // reconcile, no version to compare, and therefore none of the out-of-order
+  // hazard that shaped those two: a row either arrives or it does not, and a
+  // missed one is recovered by the panel's own next read. A plain listener
+  // is the whole requirement.
+  const contributionListeners = new Set<(row: Record<string, unknown>) => void>();
+
   function notifyPresenceListeners() {
     for (const listener of presenceListeners) {
       listener();
@@ -314,6 +322,21 @@ export function createRoomCollections({
         "postgres_changes",
         { event: "*", schema: "public", table: "cluster", filter: `room_id=eq.${roomId}` },
         (payload) => clusterHandler?.(payload),
+      )
+      // A third table on the same channel. AD-1 forbids a second *channel*,
+      // not a second table — `piece` and `cluster` already share this one.
+      // INSERT only: a contribution is never updated in a way anyone reads
+      // (Story 4.3 back-fills `user_id`, which no line displays) and never
+      // deleted except with its Room.
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "contribution", filter: `room_id=eq.${roomId}` },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          for (const listener of contributionListeners) {
+            listener(row);
+          }
+        },
       )
       // **The status callback is not a health check, and must not become
       // one.** A dead subscription still reports SUBSCRIBED (measured — see
@@ -558,6 +581,11 @@ export function createRoomCollections({
           x: mutation.modified.scatterX,
           y: mutation.modified.scatterY,
           expectedVersion,
+          // Story 4.2. The pseudo comes from the presence payload rather
+          // than from a second prop, so the name recorded in the Room's
+          // history is by construction the one the overlay is showing —
+          // they cannot disagree. The server decides what to believe of it.
+          actor: { participantId, pseudo: presencePayload?.name ?? null },
         });
       }
 
@@ -768,5 +796,15 @@ export function createRoomCollections({
     },
   };
 
-  return { pieceCollection, clusterCollection, presence };
+  /** Story 4.2 — live history, as thin as the append-only log allows. */
+  const contributions = {
+    subscribe(listener: (row: Record<string, unknown>) => void): () => void {
+      contributionListeners.add(listener);
+      return () => {
+        contributionListeners.delete(listener);
+      };
+    },
+  };
+
+  return { pieceCollection, clusterCollection, presence, contributions };
 }
