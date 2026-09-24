@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { PresenceDot } from "@/components/ui/presence-dot";
 import { diffPresence, type PresentParticipant } from "@/lib/rooms/presence";
 
 /**
@@ -31,29 +32,47 @@ export function PresenceOverlay({ participants }: { participants: PresentPartici
       </div>
 
       {participants.length > 0 && (
-        <ul
-          aria-label={t("listAriaLabel")}
-          className="absolute top-4 right-4 z-10 flex items-center -space-x-2"
-        >
-          {participants.map((participant) => {
-            const name = participant.name ?? t("anonymous");
-            return (
-              <li key={participant.participantId}>
-                <span
-                  // `title` for a mouse, the visually-hidden span for a
-                  // screen reader: an avatar showing one letter is
-                  // meaningless to both without it.
-                  title={name}
-                  style={{ backgroundColor: participant.color }}
-                  className="flex size-8 items-center justify-center rounded-full border-2 border-card text-sm font-semibold text-white shadow-sm"
-                >
-                  <span aria-hidden="true">{firstLetter(name)}</span>
-                  <span className="sr-only">{name}</span>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        /*
+          Labelled, not just drawn. A row of coloured initials is legible to
+          nobody who has not been told what it is (user feedback,
+          2026-09-24) — the avatars answer "who", and only the dot and the
+          count answer "who *what*".
+
+          The dot plus "{count} en ligne" is not invented here: it is the
+          same atom and the same wording Home already uses for each Room in
+          the list, so a Participant arriving in a Room meets a phrase they
+          have already read. Same chrome treatment as the Room title
+          opposite, for the same reason.
+        */
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 rounded-md border border-border bg-card/90 px-3 py-1.5 shadow-sm backdrop-blur-sm">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-accent-hover">
+            <PresenceDot />
+            {t("onlineCount", { count: participants.length })}
+          </span>
+          <ul
+            aria-label={t("listAriaLabel")}
+            className="flex items-center -space-x-2"
+          >
+            {participants.map((participant) => {
+              const name = participant.name ?? t("anonymous");
+              return (
+                <li key={participant.participantId}>
+                  <span
+                    // `title` for a mouse, the visually-hidden span for a
+                    // screen reader: an avatar showing one letter is
+                    // meaningless to both without it.
+                    title={name}
+                    style={{ backgroundColor: participant.color }}
+                    className="flex size-8 items-center justify-center rounded-full border-2 border-card text-sm font-semibold text-white shadow-sm"
+                  >
+                    <span aria-hidden="true">{firstLetter(name)}</span>
+                    <span className="sr-only">{name}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </>
   );

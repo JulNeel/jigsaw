@@ -117,6 +117,7 @@
     "misorientedContactMessage": "Ces deux pièces sont voisines, mais elles ne sont pas dans le bon sens. Cliquez sur une pièce libre pour la faire pivoter."
   },
   "Presence": {
+    "onlineCount": "{count} en ligne",
     "listAriaLabel": "Participants actifs dans le salon",
     "anonymous": "Invité",
     "arrived": "{name} a rejoint le salon.",

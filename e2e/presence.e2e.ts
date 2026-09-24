@@ -49,6 +49,8 @@ const ALICE = { id: "11111111-1111-4111-8111-111111111111", name: "Alice" };
 const BOB = { id: "22222222-2222-4222-8222-222222222222", name: "Bob" };
 
 const overlay = (page: Page) => page.getByRole("list", { name: /participants actifs/i });
+/** The label that says what the avatars *are* — user feedback, 2026-09-24. */
+const onlineLabel = (page: Page) => page.getByText(/\d+ en ligne/);
 
 test("each Participant sees the other, and not themselves", async ({ browser, seed }) => {
   const room = await seed({
@@ -62,12 +64,19 @@ test("each Participant sees the other, and not themselves", async ({ browser, se
     // Alone in the Room, there is nothing to draw — and an empty box saying
     // so would be worse than nothing.
     await expect(overlay(alice.page)).toHaveCount(0);
+    await expect(onlineLabel(alice.page)).toHaveCount(0);
 
     const bob = await openRoomAs(browser, room, BOB);
     try {
       // Joining is itself activity, so neither has to touch a piece first.
       await expect(overlay(alice.page).getByText("Bob")).toBeVisible({ timeout: 15_000 });
       await expect(overlay(bob.page).getByText("Alice")).toBeVisible({ timeout: 15_000 });
+
+      // A row of coloured initials means nothing on its own. The count and
+      // the presence dot are what say these are people, and that they are
+      // here now — reusing Home's own wording so the phrase is already
+      // familiar.
+      await expect(onlineLabel(alice.page)).toHaveText("1 en ligne");
 
       // The AC asks for "who **else**": seeing your own avatar would be
       // noise, and would make a solo Room look occupied.

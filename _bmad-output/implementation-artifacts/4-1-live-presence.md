@@ -130,6 +130,12 @@ Claude Opus 5
 - **A mistake worth recording, caught by the existing tests.** The edit that added the pseudo guard to `signUp` also landed in `signIn`, which has a byte-identical field-reading block — `signIn` began demanding a pseudo nobody was sending, and rejected every sign-in as a malformed submission. Seven pre-existing tests failed immediately and named it precisely. Nothing about this was caught by types.
 - No e2e for the sign-up flow, deliberately: the harness never writes to `auth.users`, and that rule is worth more than the coverage.
 
+### Completion Notes — labelling the overlay (2026-09-24, user feedback)
+
+- **"Il n'est pas évident de comprendre que les badges représentent les personnes présentes en ligne."** Fair, and the fix was already in the project rather than something to invent: `PresenceDot` is described in the UX spec as *"l'atome visuel"* of presence, and Home already renders `● {count} en ligne` for every Room in the list. The overlay had gone and made up its own form instead of reusing the one a Participant has already read.
+- Now a labelled card — dot, count, then the avatars — in the same chrome treatment as the Room title opposite it, so the two top corners read as a pair.
+- The avatars answer "who"; only the dot and the count answer "who *what*". Guarded in `presence.e2e.ts`, including that the label is absent when nobody else is there.
+
 ### File List
 
 - `src/lib/rooms/participant-identity.ts` (new, + test) — name, id and colour, mirroring `tutorial-seen.ts`'s storage contract.
@@ -146,5 +152,6 @@ Claude Opus 5
 | Date | Change |
 |------|--------|
 | 2026-09-23 | **AC amended after the first draft, at the user's decision: the activity window goes from 30 seconds to 5 minutes**, in this story and in `epics.md` where the AC originates. The draft had flagged 30s as answering "who is working" rather than "who is here", which contradicts the story's own purpose. Added AC #2b in the same pass, because the change exposed that the two ways of disappearing are different mechanisms: a real departure is a presence `leave` and is immediate, so the window only ever governs an idle-but-connected Participant. Lengthening it risks a stale entry, never a ghost. |
+| 2026-09-24 | Overlay labelled `● {count} en ligne` after user feedback that a bare row of coloured initials does not explain itself — reusing Home's own presence atom and wording rather than a new one. |
 | 2026-09-23 | Sign-up collects a pseudo (user request), stored in `user_metadata`; a registered Participant is never asked again in a Room. The validation rule is shared with the Room prompt rather than duplicated. |
 | 2026-09-23 | Story created. Three scope decisions taken with the user first: ask for a first name on entry (over an auto-generated pseudonym), ephemeral presence with no persistence (4.2/4.4 will define their own model), and this document before implementation. Verified while writing rather than assumed: Presence is available on the installed `realtime-js` 2.112.2 and rides the existing channel (so NFR5 holds structurally); the app has no display-name concept at all, so the prompt applies to registered Participants too; and a new first-load gate will break all four e2e entry points unless they are updated together. |
