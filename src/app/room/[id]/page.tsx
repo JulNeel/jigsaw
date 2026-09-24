@@ -3,6 +3,7 @@ import { Home, LogIn } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getRoomBySlug, type RoomDetail } from "@/lib/rooms/get-room-by-slug";
 import { RoomView } from "@/components/room/room-view";
+import { normalizePseudo } from "@/lib/rooms/participant-identity";
 import { createClient } from "@/lib/auth/supabase-server";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -44,6 +45,12 @@ export default async function RoomPage({
   // already-signed-in Participant sees an extra tutorial modal once, which
   // is far better than the zero-friction Guest entry point going down.
   let isGuest = true;
+  // Story 4.1: the pseudo chosen at sign-up, so a registered Participant is
+  // never asked for one again in a Room. Read here rather than client-side
+  // because this is the only place that already holds the session — and the
+  // account's *email* is deliberately not carried any further than this
+  // function.
+  let accountPseudo: string | null = null;
   try {
     const supabase = await createClient();
     const {
@@ -54,6 +61,9 @@ export default async function RoomPage({
       console.warn("RoomPage: auth.getUser() returned an error:", error);
     }
     isGuest = !user;
+    accountPseudo = normalizePseudo(
+      typeof user?.user_metadata?.pseudo === "string" ? user.user_metadata.pseudo : null,
+    );
   } catch (err) {
     console.warn("RoomPage: auth check failed, treating visitor as Guest:", err);
   }
@@ -76,7 +86,12 @@ export default async function RoomPage({
           {room.name}
         </h1>
       </div>
-      <RoomView room={room} roomSlug={slug} isGuest={isGuest} />
+      <RoomView
+        room={room}
+        roomSlug={slug}
+        isGuest={isGuest}
+        accountPseudo={accountPseudo}
+      />
     </div>
   );
 }

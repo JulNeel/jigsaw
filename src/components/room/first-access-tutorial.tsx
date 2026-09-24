@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Eye, Frame, Group, Hand, ImageIcon, RotateCw, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -65,9 +65,17 @@ function useTutorialAlreadySeen(roomSlug: string): boolean {
 export function FirstAccessTutorial({
   roomSlug,
   canvasReady,
+  onResolved,
 }: {
   roomSlug: string;
   canvasReady: boolean;
+  /**
+   * Story 4.1: fires once this dialog is out of the way, so the name prompt
+   * can follow it rather than stack on top of it. Fires for a returning
+   * Guest too, who never sees the dialog at all — waiting on a dismissal
+   * that will never come would leave them never asked for a name.
+   */
+  onResolved?: () => void;
 }) {
   const t = useTranslations("Tutorial");
   const alreadySeen = useTutorialAlreadySeen(roomSlug);
@@ -76,6 +84,13 @@ export function FirstAccessTutorial({
   // without needing to touch the external store's snapshot at all.
   const [dismissed, setDismissed] = useState(false);
   const open = canvasReady && !alreadySeen && !dismissed;
+  const resolved = canvasReady && !open;
+
+  useEffect(() => {
+    if (resolved) {
+      onResolved?.();
+    }
+  }, [resolved, onResolved]);
 
   function handleOpenChange(nextOpen: boolean) {
     // Every dismissal path (Escape, overlay click, close X, CTA, skip) goes

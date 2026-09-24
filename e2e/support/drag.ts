@@ -27,6 +27,36 @@ async function flushFrames(page: Page): Promise<void> {
 }
 
 /**
+ * Waits until Konva has genuinely finished with the gesture.
+ *
+ * Flushing frames after `mouse.up()` was not enough on its own. A full-suite
+ * run still produced, about once in six, a second back-to-back drag that
+ * moved nothing and dispatched no Server Action at all — the server log
+ * showing one write for two gestures. Konva was still mid-`dragend` when the
+ * next `mouse.down` arrived, and swallowed it.
+ *
+ * Asking the scene graph directly is the only honest signal: no node claims
+ * to be dragging, therefore the drag is over. `Konva` itself is not on
+ * `window`, but every node reachable from the stage answers `isDragging()`.
+ */
+async function waitForDragToSettle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const stage = window.__jigsawE2E?.stage;
+      if (!stage) {
+        return true;
+      }
+      const dragging = (node: unknown) =>
+        typeof (node as { isDragging?: () => boolean }).isDragging === "function" &&
+        (node as { isDragging: () => boolean }).isDragging();
+      return !dragging(stage) && !stage.find("Group").some(dragging);
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+}
+
+/**
  * Drags a piece so its centre lands on `targetWorld`.
  *
  * Both endpoints are resolved in a single `page.evaluate` so they come from
@@ -91,6 +121,7 @@ export async function dragPieceToWorld(
   await page.mouse.move(to.x, to.y);
   await flushFrames(page);
   await page.mouse.up();
+  await waitForDragToSettle(page);
   // And again *after* releasing, which is not symmetry for its own sake.
   // `dragend` is where the app does its work — prediction, the optimistic
   // mutation, the Server Action dispatch — and Konva clears its own

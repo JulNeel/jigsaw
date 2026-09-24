@@ -331,8 +331,11 @@ async function openRoomIn(
   await context.addInitScript((slug) => {
     try {
       window.sessionStorage.setItem(`jigsaw:tutorial-seen:${slug}`, "1");
+      // Story 4.1's name prompt is the second first-load dialog; seeded for
+      // the same reason as the tutorial (see `support/fixtures.ts`).
+      window.localStorage.setItem("jigsaw:display-name", "E2E");
     } catch {
-      /* a storage-less context just shows the tutorial */
+      /* a storage-less context just shows both dialogs */
     }
   }, room.slug);
   const page = await context.newPage();
