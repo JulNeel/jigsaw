@@ -2,6 +2,8 @@
 
 import type { PoolClient } from "pg";
 import { pgPool } from "@/lib/db/pg";
+import { recordContributions } from "@/lib/rooms/contributions";
+import { resolveActor, type ClaimedActor, type ResolvedActor } from "@/lib/rooms/contribution-actor";
 import { ERROR_CODES, type ErrorCode } from "@/lib/errors";
 import {
   CONTACT_TOLERANCE_FACTOR,
@@ -394,12 +396,20 @@ async function writeContagionPlacement(
   mergedMembers: readonly MergedMember[],
   clusterIdsToDelete: ReadonlySet<string>,
   draggedPieceId: string,
+  actor: ResolvedActor,
+  roomId: string,
 ): Promise<number> {
+  // Story 4.2: exactly the pieces this gesture *newly* placed. The loop
+  // already skips members that were their own anchor, so an already-placed
+  // neighbour that the contagion merely fused against is not credited to
+  // whoever happened to drop a piece next to it.
+  const newlyPlaced: string[] = [];
   for (const member of mergedMembers) {
     const target = targets.get(member.pieceId)!;
     if (member.placedRow === target.row && member.placedCol === target.col) {
       continue;
     }
+    newlyPlaced.push(member.pieceId);
     await client.query(
       `update piece
        set placed_row = $2, placed_col = $3, cluster_id = null,
@@ -413,6 +423,12 @@ async function writeContagionPlacement(
       [...clusterIdsToDelete],
     ]);
   }
+  await recordContributions(client, {
+    roomId,
+    pieceIds: newlyPlaced,
+    kind: "placed",
+    actor,
+  });
   const versionResult = await client.query(`select version from piece where id = $1`, [
     draggedPieceId,
   ]);
@@ -448,6 +464,7 @@ async function repositionFuseOrPlace(
   group: DraggedGroup,
   x: number,
   y: number,
+  actor: ResolvedActor,
 ): Promise<{ version: number; fused: boolean; placed: boolean }> {
   const geom: FrameGeometry = {
     gridRows: group.gridRows,
@@ -687,6 +704,8 @@ async function repositionFuseOrPlace(
           mergedMembers,
           clustersInMergedGroup,
           group.draggedMember.pieceId,
+          actor,
+          group.roomId,
         );
         return { version, fused: genuinelyFused, placed: true };
       }
@@ -733,6 +752,8 @@ async function repositionFuseOrPlace(
           mergedMembers,
           clustersInMergedGroup,
           group.draggedMember.pieceId,
+          actor,
+          group.roomId,
         );
         return { version, fused: genuinelyFused, placed: true };
       }
@@ -805,6 +826,17 @@ async function repositionFuseOrPlace(
     await client.query(`delete from cluster where id = any($1::uuid[])`, [redundantClusterIds]);
   }
 
+  // Story 4.2: one row for the gesture, not one per member. Fusing two
+  // Îlots of six would otherwise write twelve near-identical lines for a
+  // single action, and every piece involved was already someone's
+  // contribution when it was placed or fused the first time.
+  await recordContributions(client, {
+    roomId: group.roomId,
+    pieceIds: [group.draggedMember.pieceId],
+    kind: "fused",
+    actor,
+  });
+
   const versionResult = await client.query(`select version from piece where id = $1`, [
     group.draggedMember.pieceId,
   ]);
@@ -825,7 +857,16 @@ export async function movePiece(input: {
   x: number;
   y: number;
   expectedVersion: number;
+  // Story 4.2. What the client *claims* to be — `resolveActor` decides how
+  // much of it to believe, and a signed-in Participant's account id never
+  // comes from here.
+  actor: ClaimedActor;
 }): Promise<PieceActionResult> {
+  // Before `BEGIN`, deliberately: this verifies a JWT and can, in the worst
+  // case, reach the network. Holding a transaction open across that would
+  // lengthen the window in which this row is locked against every other
+  // Participant, for something none of the writes depend on.
+  const actor = await resolveActor(input.actor);
   const client = await pgPool.connect();
   try {
     await client.query("BEGIN");
@@ -851,6 +892,7 @@ export async function movePiece(input: {
       loaded.group,
       input.x,
       input.y,
+      actor,
     );
     await client.query("COMMIT");
     return { success: true, version, fused, placed };

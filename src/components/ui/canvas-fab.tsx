@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 // the exact offsets those four buttons already used. Named `stackSlot`, not
 // `slot` — the latter collides with the native HTML `slot` attribute already
 // present on `React.ComponentProps<"button">`.
-const FAB_SLOT_OFFSETS_REM = [1.5, 5.5, 9.5, 13.5] as const;
+const FAB_SLOT_OFFSETS_REM = [1.5, 5.5, 9.5, 13.5, 17.5] as const;
 
 export function CanvasFab({
   stackSlot,
@@ -18,7 +18,7 @@ export function CanvasFab({
   variant = "outline",
   style,
   ...props
-}: React.ComponentProps<typeof Button> & { stackSlot: 0 | 1 | 2 | 3 }) {
+}: React.ComponentProps<typeof Button> & { stackSlot: 0 | 1 | 2 | 3 | 4 }) {
   return (
     <Button
       type="button"
