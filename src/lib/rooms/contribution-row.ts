@@ -14,8 +14,14 @@ export type ContributionRow = {
   kind: "placed" | "fused";
   /** Set for a registered Participant, and established server-side. */
   userId: string | null;
-  /** Set for a Guest — the browser they played from. */
-  guestParticipantId: string | null;
+  /**
+   * Set for a Guest: a SHA-256 of the id their browser generated, never the
+   * id itself. Every client in the Room receives this — through the read and
+   * through Realtime — so it must not be the thing that claims a
+   * contribution. It is enough to group one Guest's lines and to colour
+   * them; it is not enough to take them.
+   */
+  guestKey: string | null;
   /** A snapshot taken when it happened, not a join to a current name. */
   pseudo: string | null;
   /** ISO 8601. A `Date` would not survive the Server Action boundary. */
@@ -60,8 +66,7 @@ export function toContributionRow(raw: unknown): ContributionRow | null {
     pieceId,
     kind,
     userId: typeof row.user_id === "string" ? row.user_id : null,
-    guestParticipantId:
-      typeof row.guest_participant_id === "string" ? row.guest_participant_id : null,
+    guestKey: typeof row.guest_key === "string" ? row.guest_key : null,
     pseudo: typeof row.pseudo === "string" && row.pseudo.length > 0 ? row.pseudo : null,
     createdAt: iso,
   };

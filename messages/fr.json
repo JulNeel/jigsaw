@@ -139,5 +139,12 @@
     "emptyBody": "Les contributions apparaîtront ici au fur et à mesure que le puzzle avance.",
     "loadMore": "Voir plus",
     "loading": "Chargement…"
+  },
+  "Leave": {
+    "title": "Gardez vos pièces",
+    "description": "Vous avez contribué à ce puzzle en tant qu'invité. Créez un compte, ou connectez-vous, et vos pièces vous seront attribuées. Sinon elles restent dans le salon, mais plus à votre nom.",
+    "keep": "Garder mes contributions",
+    "leaveAnyway": "Partir sans garder",
+    "claimed": "{count, plural, =1 {Une pièce vous a été attribuée.} other {# pièces vous ont été attribuées.}}"
   }
 }

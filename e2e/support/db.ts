@@ -168,7 +168,7 @@ export type ContributionRow = {
   piece_id: string;
   kind: string;
   user_id: string | null;
-  guest_participant_id: string | null;
+  guest_key: string | null;
   pseudo: string | null;
   created_at: Date;
 };
@@ -176,7 +176,7 @@ export type ContributionRow = {
 /** A Room's history, oldest first — the order it was written in. */
 export async function readContributions(roomId: string): Promise<ContributionRow[]> {
   const result = await getPool().query<ContributionRow>(
-    `select id, piece_id, kind, user_id, guest_participant_id, pseudo, created_at
+    `select id, piece_id, kind, user_id, guest_key, pseudo, created_at
      from contribution where room_id = $1 order by created_at asc, id asc`,
     [roomId],
   );
