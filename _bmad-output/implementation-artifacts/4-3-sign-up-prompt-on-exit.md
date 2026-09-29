@@ -109,6 +109,18 @@ Claude Opus 5
 - The claim is scoped to an explicit intent held in `sessionStorage`, never to any successful auth. On a shared machine, claiming at every sign-in would attach a previous Guest's pieces to whoever signs in next.
 - **Not testable end to end, and said so rather than implied otherwise:** the claim itself needs a real account, and this harness never writes to `auth.users`. What e2e covers is the offer — it appears for a Guest who contributed, stays away from one who only repositioned a piece, and costs nothing to refuse.
 
+### Completion Notes — the dead end you found (2026-09-29, user report)
+
+> *"cette annonce a lieu dans mon dashboard et comme je n'ai pas de salon qui me soient propres je n'ai plus aucun lien pour retourner sur le puzzle"*
+
+- Exactly right, and it is a contradiction the ACs never contemplated: the app announces that contributions are now yours, then leaves you on a dashboard that lists only Rooms you **created** (`get-rooms-for-user.ts`: `where r.created_by = $1`). A Guest who contributed to someone else's Room signs up and meets an empty page.
+- Listing Rooms you have *contributed to* is **Story 4.4's own acceptance criterion** ("whether they return via the Room's link or by selecting it from Home"), so it stays there rather than being pulled forward. But shipping 4.3 with the dead end would have been wrong regardless.
+- **The fix is not to add a link from Home — it is to stop sending them to Home.** They were interrupted mid-puzzle; they should come back to it. That required the `?next=` redirect-back mechanism, which has been an open item in `deferred-work.md` since Story 2.1's review. It is now implemented and this story closes that item too.
+- `safeNextPath` is a separate, tested module because **an unchecked `next` is an open redirect** — one of the oldest ways to turn a trusted domain into a phishing hop. Ten tests, including the case a naive `startsWith("/")` guard lets through: `//evil.example`, which browsers treat as absolute despite the leading slash.
+- `ClaimContributionsOnAuth` moved from Home to the layout as a consequence. Landing back in the Room means the claim has to happen wherever auth drops you, not wherever it used to.
+- **A copy inaccuracy found while explaining it**: the toast said "pièces" but the counter counts *contributions*, and a fusion is one without being a piece. Now "contributions".
+- **Two source files contained literal control bytes**, including a NUL, from writing `\u0000` into a regex and a test string. They worked, and were invisible in an editor. Replaced with real escape sequences; the tree is now clean, checked by sweeping every `.ts`/`.tsx` under `src/`.
+
 ### File List
 
 - `supabase/migrations/20260927000000_contribution_guest_key.sql` (new, applied 2026-09-28) — the rename and the in-place hash.
@@ -117,11 +129,14 @@ Claude Opus 5
 - `src/lib/rooms/claim-intent.ts` (new), `src/lib/rooms/session-contribution-events.ts` (new).
 - `src/components/room/leave-prompt.tsx` (new), `src/app/claim-contributions-on-auth.tsx` (new).
 - `src/lib/rooms/contribution-actor.ts`, `contribution-row.ts` (+ test), `contributions.ts`, `fetch-contributions.ts`, `src/lib/db/collections.ts`, `src/components/room/contributor-history.tsx`, `src/app/page.tsx`, `src/app/room/[id]/page.tsx`, `messages/fr.json` (modified).
+- `src/lib/auth/safe-next-path.ts` (new, + test) — the open-redirect guard for `?next=`.
+- `src/lib/auth/actions.ts`, `src/app/sign-in/page.tsx`, `sign-in-form.tsx`, `sign-up-form.tsx`, `src/app/layout.tsx` (modified) — redirect-back, closing a deferred item open since Story 2.1.
 - `e2e/leave-prompt.e2e.ts` (new); `e2e/support/db.ts`, `e2e/contributor-history.e2e.ts` (modified).
 
 ## Change Log
 
 | Date | Change |
 |------|--------|
+| 2026-09-29 | Fixed a dead end found in real use: signing up to keep contributions left the person on an empty dashboard with no route back to the puzzle. They now return to the Room, via a `?next=` mechanism deferred since Story 2.1 and guarded by a tested open-redirect check. |
 | 2026-09-28 | Implemented, AC #2 excepted. The migration's planned truncate was wrong — 45 real contributions existed — and the column was hashed in place instead. |
 | 2026-09-26 | Story created. The central finding is not in the ACs: Story 4.2's `guest_participant_id` reaches every client through both the read action and Realtime, so keying ownership transfer on it would let any Participant claim any Guest's contributions. The column becomes a hash, which is cheap now and expensive later — it is two days old and holds only test rows. Also recommends *not* implementing AC #2: no browser lets a page show its own dialog on tab close, and the generic one would warn about losing work that is already committed. |

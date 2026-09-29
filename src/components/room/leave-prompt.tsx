@@ -37,7 +37,24 @@ import { rememberClaimIntent } from "@/lib/rooms/claim-intent";
  * `participantId`, so signing up days later still claims those
  * contributions.
  */
-export function LeavePrompt({ isGuest, ariaLabel }: { isGuest: boolean; ariaLabel: string }) {
+export function LeavePrompt({
+  isGuest,
+  ariaLabel,
+  roomPath,
+}: {
+  isGuest: boolean;
+  ariaLabel: string;
+  /**
+   * Where to come back to. Without it, someone who signs up to keep their
+   * contributions lands on a dashboard that lists only Rooms they created —
+   * so a Guest's first sight of their new account is an empty page and no
+   * way back to the puzzle they were just playing (user report,
+   * 2026-09-29). Listing contributed-to Rooms on Home is Story 4.4's own
+   * AC; returning someone to where they were interrupted is this story's
+   * job either way.
+   */
+  roomPath: string;
+}) {
   const t = useTranslations("Leave");
   const [contributed, setContributed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -89,7 +106,7 @@ export function LeavePrompt({ isGuest, ariaLabel }: { isGuest: boolean; ariaLabe
               className="min-h-11 w-full"
               onClick={() => rememberClaimIntent(loadOrCreateParticipantId(getSafeLocalStorage()))}
             >
-              <Link href="/sign-in">{t("keep")}</Link>
+              <Link href={`/sign-in?next=${encodeURIComponent(roomPath)}`}>{t("keep")}</Link>
             </Button>
             {/* `outline`, not `ghost`: AC #1's "without pressure" is a
                 design constraint, and a muted-text button next to a filled

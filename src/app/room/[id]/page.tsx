@@ -76,7 +76,11 @@ export default async function RoomPage({
           // Story 4.3: the same link, which now asks before it lets a Guest
           // walk away from contributions nobody will be able to attribute to
           // them afterwards.
-          <LeavePrompt isGuest={isGuest} ariaLabel={t("signInAriaLabel")} />
+          <LeavePrompt
+            isGuest={isGuest}
+            ariaLabel={t("signInAriaLabel")}
+            roomPath={`/room/${slug}`}
+          />
         ) : (
           <Link
             href="/"

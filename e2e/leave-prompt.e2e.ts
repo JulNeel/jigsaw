@@ -24,35 +24,64 @@ import { waitForVersionAbove } from "./support/wait";
 const exitLink = (page: import("@playwright/test").Page) =>
   page.getByRole("link", { name: /se connecter ou créer un compte/i });
 
-test("a Guest who contributed is asked before leaving", async ({ page, seed, openRoom }) => {
-  const room = await seed({
-    gridRows: 3,
-    gridCols: 3,
-    pieces: {
-      "1,1": { at: { x: -250, y: 0 } },
-      "1,2": { placed: { row: 1, col: 2 } },
-      "2,1": { placed: { row: 2, col: 1 } },
-    },
-  });
-  const movingId = room.pieceId(1, 1);
+const contributedRoom = {
+  gridRows: 3,
+  gridCols: 3,
+  pieces: {
+    "1,1": { at: { x: -250, y: 0 } },
+    "1,2": { placed: { row: 1, col: 2 } },
+    "2,1": { placed: { row: 2, col: 1 } },
+  },
+} as const;
 
+test("a Guest who contributed is asked, and keeping carries the way back", async ({
+  page,
+  seed,
+  openRoom,
+}) => {
+  const room = await seed(contributedRoom);
   await openRoom(room);
-  await dragPieceToWorld(page, movingId, room.slotWorld(1, 1));
-  await waitForVersionAbove(page, movingId, 0);
+  await dragPieceToWorld(page, room.pieceId(1, 1), room.slotWorld(1, 1));
+  await waitForVersionAbove(page, room.pieceId(1, 1), 0);
 
   await exitLink(page).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText(/garder/i);
 
-  // Refusing is a real option, not a grey escape hatch, and it must cost
-  // nothing: the contribution stays in the Room, it simply stops being
-  // attributable (AC #4).
+  await dialog.getByRole("link", { name: /garder mes contributions/i }).click();
+
+  // The way back travels with them. Without it, signing up lands the person
+  // on a dashboard that lists only Rooms they *created* — so a Guest who
+  // just chose to keep their contributions would meet an empty page and no
+  // route to the puzzle they were playing (user report, 2026-09-29).
+  await page.waitForURL(/\/sign-in\?next=/);
+  const carried = await page
+    .locator('input[name="next"]')
+    .evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value));
+  // Both forms, because either one can be how an interrupted Guest
+  // finishes: a new account, or one they already had.
+  expect(carried).toEqual([room.path, room.path]);
+});
+
+test("refusing costs the Guest nothing", async ({ page, seed, openRoom }) => {
+  // AC #4: the contribution stays in the Room, it simply stops being
+  // attributable. Nothing is deleted, and nothing changes hands.
+  const room = await seed(contributedRoom);
+  await openRoom(room);
+  await dragPieceToWorld(page, room.pieceId(1, 1), room.slotWorld(1, 1));
+  await waitForVersionAbove(page, room.pieceId(1, 1), 0);
+
   const before = await readContributions(room.roomId);
   expect(before).toHaveLength(1);
 
-  await dialog.getByRole("link", { name: /partir sans garder/i }).click();
+  await exitLink(page).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("link", { name: /partir sans garder/i })
+    .click();
   await page.waitForURL(/\/sign-in/);
+  // No `next`: refusing means going nowhere in particular.
+  expect(new URL(page.url()).searchParams.get("next")).toBeNull();
 
   const after = await readContributions(room.roomId);
   expect(after).toHaveLength(1);

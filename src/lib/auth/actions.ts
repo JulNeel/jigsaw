@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/auth/supabase-server";
 import { classifySignUpError } from "@/lib/auth/classify-sign-up-error";
 import { normalizePseudo } from "@/lib/rooms/participant-identity";
+import { safeNextPath } from "@/lib/auth/safe-next-path";
 
 export type AuthFormState = {
   error?: {
@@ -87,7 +88,10 @@ export async function signUp(
     };
   }
 
-  redirect("/");
+  // Story 4.3 follow-up: back where they were interrupted, when there is
+  // such a place. `safeNextPath` is what stops this from being an open
+  // redirect — see that module.
+  redirect(safeNextPath(formData.get("next")) ?? "/");
 }
 
 export type SignInState = AuthFormState;
@@ -148,5 +152,5 @@ export async function signIn(
     };
   }
 
-  redirect("/");
+  redirect(safeNextPath(formData.get("next")) ?? "/");
 }
