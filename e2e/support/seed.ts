@@ -41,6 +41,13 @@ export type SeedSpec = {
   clusters?: Record<string, { anchorX: number; anchorY: number }>;
   /** Keyed `"row,col"`. Cells left out still get seeded — see below. */
   pieces?: Record<string, SeedPieceSpec>;
+  /**
+   * Who owns the Room. Defaults to the borrowed account every other fixture
+   * uses. Story 4.4 needs the other case — a Room you did *not* create but
+   * played in — and that cannot be faked: `created_by` is a foreign key into
+   * `auth.users`, which this harness only ever reads.
+   */
+  ownerId?: string;
 };
 
 export type SeededRoom = {
@@ -75,6 +82,57 @@ async function borrowUserId(): Promise<string> {
   }
   cachedUserId = id;
   return id;
+}
+
+/**
+ * Several distinct real accounts, oldest first — the first is the one
+ * `borrowUserId` hands out, so a fixture can say "owned by the usual
+ * account, contributed to by someone else" and mean it.
+ *
+ * Throws rather than returning a short list: a test that silently got two
+ * copies of the same id would pass while proving nothing, which is the
+ * failure mode this exists to avoid.
+ */
+export async function borrowUserIds(count: number): Promise<string[]> {
+  const result = await getPool().query<{ id: string }>(
+    `select id from auth.users order by created_at asc limit $1`,
+    [count],
+  );
+  if (result.rows.length < count) {
+    throw new Error(
+      `e2e: needs ${count} distinct accounts in auth.users, found ${result.rows.length}. ` +
+        "Sign up once more in the app — this harness never creates users itself.",
+    );
+  }
+  return result.rows.map((row) => row.id);
+}
+
+/**
+ * A contribution row, written directly. The app writes these inside
+ * `movePiece`'s transaction; a fixture that needs a *history* rather than a
+ * gesture would otherwise have to drive dozens of drags to build one.
+ */
+export async function seedContribution(params: {
+  roomId: string;
+  pieceId: string;
+  userId: string | null;
+  kind?: "placed" | "fused";
+  guestKey?: string | null;
+  createdAt?: Date;
+}): Promise<void> {
+  await getPool().query(
+    `insert into contribution
+       (room_id, piece_id, kind, user_id, guest_key, created_at)
+     values ($1, $2, $3, $4, $5, coalesce($6, now()))`,
+    [
+      params.roomId,
+      params.pieceId,
+      params.kind ?? "placed",
+      params.userId,
+      params.guestKey ?? null,
+      params.createdAt ?? null,
+    ],
+  );
 }
 
 /**
@@ -115,7 +173,7 @@ export async function seedRoom(spec: SeedSpec): Promise<SeededRoom> {
   };
   const slug = `${E2E_PREFIX}${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
   const roomId = randomUUID();
-  const createdBy = await borrowUserId();
+  const createdBy = spec.ownerId ?? (await borrowUserId());
   const pool = getPool();
   const client = await pool.connect();
 

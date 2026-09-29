@@ -88,7 +88,7 @@ development_status:
   4-1-live-presence: done
   4-2-contributor-history: done
   4-3-sign-up-prompt-on-exit: review
-  4-4-returning-participant-keeps-their-progress: backlog
+  4-4-returning-participant-keeps-their-progress: review
   epic-4-retrospective: optional
 
   epic-5: backlog

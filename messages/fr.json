@@ -24,6 +24,8 @@
     "emptyTitle": "Aucun Salon pour l'instant",
     "emptyBody": "Créez-en un pour votre famille, ou rejoignez celui d'un proche via un lien.",
     "roomComplete": "Terminé",
+    "roomJoined": "Rejoint",
+    "roomMyContributions": "{count, plural, =1 {votre contribution} other {vos # contributions}}",
     "roomOnline": "{count} en ligne",
     "loadErrorTitle": "Impossible de charger vos Salons",
     "loadErrorBody": "Une erreur est survenue. Rechargez la page pour réessayer.",
