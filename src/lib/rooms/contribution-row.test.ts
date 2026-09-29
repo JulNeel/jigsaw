@@ -6,7 +6,7 @@ const dbRow = (overrides: Record<string, unknown> = {}) => ({
   piece_id: "22222222-2222-2222-2222-222222222222",
   kind: "placed",
   user_id: null,
-  guest_participant_id: "33333333-3333-3333-3333-333333333333",
+  guest_key: "a".repeat(64),
   pseudo: "Julien",
   created_at: new Date("2026-09-24T10:00:00.000Z"),
   ...overrides,
@@ -17,7 +17,7 @@ const row = (id: string, createdAt: string): ContributionRow => ({
   pieceId: "p",
   kind: "placed",
   userId: null,
-  guestParticipantId: "g",
+  guestKey: "a".repeat(64),
   pseudo: "Julien",
   createdAt,
 });
@@ -29,7 +29,7 @@ describe("toContributionRow", () => {
       pieceId: "22222222-2222-2222-2222-222222222222",
       kind: "placed",
       userId: null,
-      guestParticipantId: "33333333-3333-3333-3333-333333333333",
+      guestKey: "a".repeat(64),
       pseudo: "Julien",
       createdAt: "2026-09-24T10:00:00.000Z",
     });
@@ -45,10 +45,10 @@ describe("toContributionRow", () => {
 
   it("carries a registered contributor's account id", () => {
     const mapped = toContributionRow(
-      dbRow({ user_id: "44444444-4444-4444-4444-444444444444", guest_participant_id: null }),
+      dbRow({ user_id: "44444444-4444-4444-4444-444444444444", guest_key: null }),
     );
     expect(mapped?.userId).toBe("44444444-4444-4444-4444-444444444444");
-    expect(mapped?.guestParticipantId).toBeNull();
+    expect(mapped?.guestKey).toBeNull();
   });
 
   it("treats an absent pseudo as absent, not as an empty name", () => {

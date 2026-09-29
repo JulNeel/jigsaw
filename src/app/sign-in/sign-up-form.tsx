@@ -10,7 +10,7 @@ import { MAX_PSEUDO_LENGTH } from "@/lib/rooms/participant-identity";
 
 const initialState: SignUpState = {};
 
-export function SignUpForm() {
+export function SignUpForm({ next }: { next?: string }) {
   const t = useTranslations("Auth");
   const [state, formAction, isPending] = useActionState(
     signUp,
@@ -19,6 +19,11 @@ export function SignUpForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {/* Where to go afterwards, when the person was interrupted on their
+          way somewhere — a Guest leaving a Room to keep their
+          contributions, today. Validated server-side by `safeNextPath`;
+          nothing here is trusted. */}
+      <input type="hidden" name="next" value={next ?? ""} />
       {/* First, and deliberately: it is the only field the other people in
           a Room will ever see, and asking for it before the credentials
           reads as an introduction rather than as paperwork. */}

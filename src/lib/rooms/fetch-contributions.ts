@@ -34,7 +34,7 @@ export async function fetchContributions(
   cursor?: ContributionCursor,
 ): Promise<{ rows: ContributionRow[]; nextCursor: ContributionCursor | null }> {
   const result = await pgPool.query(
-    `select id, piece_id, kind, user_id, guest_participant_id, pseudo, created_at
+    `select id, piece_id, kind, user_id, guest_key, pseudo, created_at
      from contribution
      where room_id = $1
        and ($2::timestamptz is null or (created_at, id) < ($2::timestamptz, $3::uuid))

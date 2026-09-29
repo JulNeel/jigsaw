@@ -36,6 +36,7 @@ import {
 } from "@/lib/rooms/placement-conflict-events";
 import { emitPiecePlaced } from "@/lib/rooms/piece-placement-events";
 import { emitMoveConflict } from "@/lib/rooms/move-conflict-events";
+import { emitOwnContribution } from "@/lib/rooms/session-contribution-events";
 import {
   consumeAndCheckPredictedFusion,
   emitFusionConflict,
@@ -643,6 +644,15 @@ export function createRoomCollections({
       // near-Frame-slot one), draining the registry every time regardless
       // of outcome; a move the client never predicted as a placement simply
       // reads back `false` here, a no-op.
+      // Story 4.3: this client just contributed — a placement or a fusion,
+      // never a plain reposition, matching exactly what the history records.
+      // Read from the server's own answer rather than from the prediction,
+      // so an offer to keep your contributions is never made on the strength
+      // of a guess that turned out wrong.
+      if (result.placed || result.fused) {
+        emitOwnContribution();
+      }
+
       const wasPredictedLock = consumeAndCheckPredictedLock(pieceId);
       if (wasPredictedLock && result.placed === false) {
         emitPlacementConflict();

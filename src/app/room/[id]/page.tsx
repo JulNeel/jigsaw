@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { Home, LogIn } from "lucide-react";
+import { Home } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { getRoomBySlug, type RoomDetail } from "@/lib/rooms/get-room-by-slug";
 import { RoomView } from "@/components/room/room-view";
+import { LeavePrompt } from "@/components/room/leave-prompt";
 import { normalizePseudo } from "@/lib/rooms/participant-identity";
 import { createClient } from "@/lib/auth/supabase-server";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -71,17 +72,24 @@ export default async function RoomPage({
   return (
     <div className="relative h-dvh w-full overflow-hidden">
       <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-        <Link
-          href={isGuest ? "/sign-in" : "/"}
-          aria-label={isGuest ? t("signInAriaLabel") : t("backToHomeAriaLabel")}
-          className="flex size-9 items-center justify-center rounded-full border border-border bg-card/90 shadow-sm backdrop-blur-sm"
-        >
-          {isGuest ? (
-            <LogIn className="size-4" aria-hidden="true" />
-          ) : (
+        {isGuest ? (
+          // Story 4.3: the same link, which now asks before it lets a Guest
+          // walk away from contributions nobody will be able to attribute to
+          // them afterwards.
+          <LeavePrompt
+            isGuest={isGuest}
+            ariaLabel={t("signInAriaLabel")}
+            roomPath={`/room/${slug}`}
+          />
+        ) : (
+          <Link
+            href="/"
+            aria-label={t("backToHomeAriaLabel")}
+            className="flex size-9 items-center justify-center rounded-full border border-border bg-card/90 shadow-sm backdrop-blur-sm"
+          >
             <Home className="size-4" aria-hidden="true" />
-          )}
-        </Link>
+          </Link>
+        )}
         <h1 className="pointer-events-none rounded-md border border-border bg-card/90 px-3 py-1.5 text-sm font-semibold backdrop-blur-sm">
           {room.name}
         </h1>

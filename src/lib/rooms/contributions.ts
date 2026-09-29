@@ -40,14 +40,14 @@ export async function recordContributions(
     return;
   }
   const { roomId, kind, actor } = args;
-  const values: unknown[] = [roomId, kind, actor.userId, actor.guestParticipantId, actor.pseudo];
+  const values: unknown[] = [roomId, kind, actor.userId, actor.guestKey, actor.pseudo];
   const rows = args.pieceIds.map((pieceId) => {
     values.push(pieceId);
     return `($1, $${values.length}, $2, $3, $4, $5)`;
   });
   await client.query(
     `insert into contribution
-       (room_id, piece_id, kind, user_id, guest_participant_id, pseudo)
+       (room_id, piece_id, kind, user_id, guest_key, pseudo)
      values ${rows.join(", ")}`,
     values,
   );

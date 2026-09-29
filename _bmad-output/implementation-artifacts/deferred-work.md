@@ -117,7 +117,7 @@ such when reading this file.
 
 ## Deferred from: code review of story-2-1-gate-room-creation-to-registered-participants (2026-08-13)
 
-- The auth gate has no redirect-back mechanism (`?next=`) — a Guest bounced from a protected route to `/sign-in` loses their original destination. Pre-existing gap since Story 1.4 introduced `requireUser()`; fixing it properly means touching the shared `signIn`/`signUp` Server Actions and both forms across three already-completed stories. Recommend scoping as its own future story (e.g. "Preserve destination through sign-in") rather than folding into whichever story next calls `requireUser()` [src/lib/auth/require-user.ts, src/lib/auth/actions.ts, src/app/sign-in/*]
+- ~~The auth gate has no redirect-back mechanism (`?next=`)~~ — **RESOLVED 2026-09-29** (Story 4.3): `safeNextPath` plus a hidden `next` field on both auth forms. Prompted by a real dead end rather than by the note itself — a Guest signing up to keep their contributions had nowhere to go back to. Original note: the auth gate has no redirect-back mechanism (`?next=`) — a Guest bounced from a protected route to `/sign-in` loses their original destination. Pre-existing gap since Story 1.4 introduced `requireUser()`; fixing it properly means touching the shared `signIn`/`signUp` Server Actions and both forms across three already-completed stories. Recommend scoping as its own future story (e.g. "Preserve destination through sign-in") rather than folding into whichever story next calls `requireUser()` [src/lib/auth/require-user.ts, src/lib/auth/actions.ts, src/app/sign-in/*]
 
 ## Deferred from: code review of story-2-2-choose-the-puzzle-image (2026-08-13)
 

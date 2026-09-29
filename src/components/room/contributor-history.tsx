@@ -98,7 +98,7 @@ function HistoryLine({ row }: { row: ContributionRow }) {
   // presence overlay colours them, so the same person reads the same way in
   // both places. A registered Participant is coloured by their account id
   // for the same reason — it is stable across their devices.
-  const color = colorForParticipant(row.userId ?? row.guestParticipantId ?? row.id);
+  const color = colorForParticipant(row.userId ?? row.guestKey ?? row.id);
   const at = new Date(row.createdAt);
 
   return (

@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/auth/supabase-server";
 import { normalizePseudo } from "@/lib/rooms/participant-identity";
+import { guestKeyFor } from "@/lib/rooms/guest-key";
 
 /**
  * Who a client *says* it is. Nothing here is trusted on its own.
@@ -20,8 +21,8 @@ export type ClaimedActor = {
  * "this was account X".
  */
 export type ResolvedActor =
-  | { userId: string; guestParticipantId: null; pseudo: string | null }
-  | { userId: null; guestParticipantId: string; pseudo: string | null };
+  | { userId: string; guestKey: null; pseudo: string | null }
+  | { userId: null; guestKey: string; pseudo: string | null };
 
 /**
  * Establishes the contributor for a write, server-side.
@@ -53,7 +54,9 @@ export type ResolvedActor =
 export async function resolveActor(claimed: ClaimedActor): Promise<ResolvedActor> {
   const guest: ResolvedActor = {
     userId: null,
-    guestParticipantId: claimed.participantId,
+    // Hashed here, so the raw id never reaches the database and therefore
+    // never reaches the other Participants — see `guest-key.ts`.
+    guestKey: guestKeyFor(claimed.participantId),
     // Normalised server-side: length and blankness are not a client's to
     // decide, and this value is displayed to everyone else in the Room.
     pseudo: normalizePseudo(claimed.pseudo),
@@ -70,7 +73,7 @@ export async function resolveActor(claimed: ClaimedActor): Promise<ResolvedActor
       typeof metadata === "object" && metadata !== null
         ? normalizePseudo((metadata as Record<string, unknown>).pseudo as string | undefined)
         : null;
-    return { userId: data.claims.sub, guestParticipantId: null, pseudo };
+    return { userId: data.claims.sub, guestKey: null, pseudo };
   } catch {
     // Auth unreachable, misconfigured, or a malformed cookie. Attributing
     // the contribution to the browser that made it is a worse answer than

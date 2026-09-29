@@ -9,7 +9,7 @@ import { signIn, type SignInState } from "@/lib/auth/actions";
 
 const initialState: SignInState = {};
 
-export function SignInForm() {
+export function SignInForm({ next }: { next?: string }) {
   const t = useTranslations("Auth");
   const [state, formAction, isPending] = useActionState(
     signIn,
@@ -18,6 +18,11 @@ export function SignInForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {/* Where to go afterwards, when the person was interrupted on their
+          way somewhere — a Guest leaving a Room to keep their
+          contributions, today. Validated server-side by `safeNextPath`;
+          nothing here is trusted. */}
+      <input type="hidden" name="next" value={next ?? ""} />
       <Field
         label={t("emailLabel")}
         htmlFor="sign-in-email"

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Browser, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { dragPieceToWorld } from "./support/drag";
@@ -90,7 +91,9 @@ test("a placement appears in another Participant's open history, without a refre
     expect(rows[0].kind).toBe("placed");
     expect(rows[0].piece_id).toBe(movingId);
     expect(rows[0].pseudo).toBe("Alice");
-    expect(rows[0].guest_participant_id).toBe(ALICE.id);
+    // The *hash*, never the id itself — Story 4.3 made this the key that
+    // claims a contribution, and this column is broadcast to the whole Room.
+    expect(rows[0].guest_key).toBe(createHash("sha256").update(ALICE.id, "utf8").digest("hex"));
     // A Guest has no account, and inventing one would be the worst possible
     // failure here.
     expect(rows[0].user_id).toBeNull();
