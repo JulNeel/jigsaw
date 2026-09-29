@@ -68,10 +68,33 @@ export async function RoomList({ userId }: { userId: string }) {
             key={room.id}
             href={`/room/${room.inviteSlug}`}
             thumbnail={<RoomThumbnail room={room} />}
-            name={room.name}
+            name={
+              // A Room reached by someone else's invite link now appears
+              // here too, so the list has to say which are yours. The
+              // missing delete button is an absence, and an absence is not
+              // a signal — this is.
+              room.isOwner ? (
+                room.name
+              ) : (
+                <span className="flex items-baseline gap-2 overflow-hidden">
+                  <span className="truncate">{room.name}</span>
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                    {tHome("roomJoined")}
+                  </span>
+                </span>
+              )
+            }
             meta={
               <>
                 {formatRoomProgress(room.piecesPlaced, room.pieceCount, tRooms)}
+                {room.myContributions > 0 && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="whitespace-nowrap">
+                      {tHome("roomMyContributions", { count: room.myContributions })}
+                    </span>
+                  </>
+                )}
                 <span aria-hidden="true">·</span>
                 {isComplete ? (
                   <span className="font-medium text-primary">{tHome("roomComplete")}</span>
@@ -85,7 +108,12 @@ export async function RoomList({ userId }: { userId: string }) {
                 )}
               </>
             }
-            action={<DeleteRoomButton roomId={room.id} roomName={room.name} />}
+            // Owners only. `deleteRoom` already refuses anyone else (`where
+            // id = $1 and created_by = $2`), so this is not the guard — but
+            // a button that silently does nothing is worse than no button.
+            action={
+              room.isOwner ? <DeleteRoomButton roomId={room.id} roomName={room.name} /> : undefined
+            }
           />
         );
       })}

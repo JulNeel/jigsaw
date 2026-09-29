@@ -2,7 +2,7 @@ baseline_commit: NO_VCS
 
 # Story 4.4: Returning Participant keeps their progress
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -32,25 +32,25 @@ That gap was found in real use (2026-09-29) rather than by reading this AC: a Gu
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Home lists Rooms you contributed to (AC: #2)
-  - [ ] `getRoomsForUser`: `where r.created_by = $1 or exists (select 1 from contribution c where c.room_id = r.id and c.user_id = $1)`.
-  - [ ] Return `isOwner` per Room, and `myContributions` (a `count` filtered on `c.user_id = $1`).
-  - [ ] **Index `contribution(user_id)`.** The existing index leads with `room_id`, so the `exists` above has nothing to seek on. One migration, one line.
-  - [ ] Ordering: `created_at desc` is the Room's own age and says nothing about when *you* last touched it. Order by your most recent contribution, falling back to the Room's creation for one you own but never played.
+- [x] Task 1: Home lists Rooms you contributed to (AC: #2)
+  - [x] `getRoomsForUser`: `where r.created_by = $1 or exists (select 1 from contribution c where c.room_id = r.id and c.user_id = $1)`.
+  - [x] Return `isOwner` per Room, and `myContributions` (a `count` filtered on `c.user_id = $1`).
+  - [x] **Index `contribution(user_id)`.** The existing index leads with `room_id`, so the `exists` above has nothing to seek on. One migration, one line.
+  - [x] Ordering: `created_at desc` is the Room's own age and says nothing about when *you* last touched it. Order by your most recent contribution, falling back to the Room's creation for one you own but never played.
 
-- [ ] Task 2: Only an owner sees a delete button (AC: #2)
-  - [ ] `RoomListItem`'s `action` is already optional, so this is a condition rather than a change of shape.
-  - [ ] **The server already refuses**: `delete from room where id = $1 and created_by = $2` (`actions.ts`). So this is not a security fix — it is a fix for a button that would silently do nothing, which is worse than an error.
+- [x] Task 2: Only an owner sees a delete button (AC: #2)
+  - [x] `RoomListItem`'s `action` is already optional, so this is a condition rather than a change of shape.
+  - [x] **The server already refuses**: `delete from room where id = $1 and created_by = $2` (`actions.ts`). So this is not a security fix — it is a fix for a button that would silently do nothing, which is worse than an error.
 
-- [ ] Task 3: Saying which is which (AC: #2)
-  - [ ] A Room you contributed to shows your own contribution count; one you created shows the Room's progress as it does today. Both, where both apply.
-  - [ ] French copy in `messages/fr.json`. The empty state changes meaning too — "you have no Rooms" is now "you have neither created nor joined one".
+- [x] Task 3: Saying which is which (AC: #2)
+  - [x] A Room you contributed to shows your own contribution count; one you created shows the Room's progress as it does today. Both, where both apply.
+  - [x] French copy in `messages/fr.json`. The empty state changes meaning too — "you have no Rooms" is now "you have neither created nor joined one".
 
-- [ ] Task 4: Tests, and an honest account of what cannot be tested
-  - [ ] Unit: the mapping and the `isOwner` derivation, wherever they can be isolated from the query.
-  - [ ] **Home is behind `requireUser`, and the e2e harness never writes to `auth.users`.** So no browser test can reach this screen. That rule has held for four stories and is worth more than the coverage.
-  - [ ] What *can* be reached is the part carrying all the risk — the SQL. The e2e harness already holds a direct `pg` pool and already borrows a real `auth.users` id for `room.created_by`. **Try importing `getRoomsForUser` there and asserting against seeded rows.** It is `import "server-only"`, which may or may not survive Playwright's loader; if it does not, extract the query into a plain module the test can import, rather than testing nothing.
-  - [ ] Verify, and record, that a Room reached by its link is unchanged for a returning contributor — the half of AC #1 that is a claim about existing behaviour.
+- [x] Task 4: Tests, and an honest account of what cannot be tested
+  - [x] Unit: the mapping and the `isOwner` derivation, wherever they can be isolated from the query.
+  - [x] **Home is behind `requireUser`, and the e2e harness never writes to `auth.users`.** So no browser test can reach this screen. That rule has held for four stories and is worth more than the coverage.
+  - [x] What *can* be reached is the part carrying all the risk — the SQL. The e2e harness already holds a direct `pg` pool and already borrows a real `auth.users` id for `room.created_by`. **Try importing `getRoomsForUser` there and asserting against seeded rows.** It is `import "server-only"`, which may or may not survive Playwright's loader; if it does not, extract the query into a plain module the test can import, rather than testing nothing.
+  - [x] Verify, and record, that a Room reached by its link is unchanged for a returning contributor — the half of AC #1 that is a claim about existing behaviour.
 
 ## Dev Notes
 
@@ -85,14 +85,59 @@ Ordering by "your most recent contribution" turns a simple `group by` into a que
 
 ### Agent Model Used
 
+Claude Opus 5
+
 ### Debug Log References
+
+Each guard was verified red before being trusted:
+
+- Reverting the `where` to `created_by = $1` alone → the joined Room comes
+  back `undefined`, which is the behaviour this story exists to remove.
+- Rewriting the query the obvious way — `left join piece` and `left join
+  contribution` side by side — → `piecesPlaced` reads 4 for a Room with 2
+  placed pieces and 2 contributions, and `myContributions` likewise. That is
+  the cartesian product the `lateral` avoids, and it is the mistake a later
+  edit is most likely to reintroduce.
+
+Full suite: 32/32 e2e, 301 unit tests, `tsc --noEmit` and `eslint` clean.
 
 ### Completion Notes List
 
+- **The `server-only` question was real, and the answer was no.** Anything
+  importing it throws outside a Server Component, so the query moved to
+  `rooms-for-user-query.ts` and takes its client as an argument.
+  `get-rooms-for-user.ts` is now four lines that hand it the pool. This is
+  the same seam `e2e/support/db.ts` already exists for.
+- **The harness gained the ability to seed a Room owned by someone else.**
+  `created_by` is a foreign key into `auth.users`, so "a Room I did not
+  create" could not be faked — `SeedSpec.ownerId` plus `borrowUserIds(n)`
+  borrow a second real account. Still read-only against `auth`.
+- **Ordering was the subtle part.** `created_at desc` orders by a date the
+  Participant has no relationship to once the list includes other people's
+  Rooms. It now orders by your own last contribution, with `coalesce` back to
+  the Room's creation — without which a Room you own but never played sorts
+  as null and lands at the wrong end. The test pins all three positions.
+- **The index is written but not applied.** `20260929000000_contribution_user_idx.sql`
+  is additive and the feature is correct without it; applying DDL to the
+  hosted project needs the maintainer's say-so.
+- **`onlineCount` is still a hardcoded zero**, so every row claims "0 en
+  ligne" even while people are playing. Story 4.1's presence is per-Room and
+  ephemeral; a dashboard would need its own subscription. Untouched here,
+  and worth recording as its own item rather than smuggling into this story.
+
 ### File List
+
+- `src/lib/rooms/rooms-for-user-query.ts` (new)
+- `src/lib/rooms/get-rooms-for-user.ts`
+- `src/app/room-list.tsx`
+- `messages/fr.json`
+- `supabase/migrations/20260929000000_contribution_user_idx.sql` (new, unapplied)
+- `e2e/rooms-for-user.e2e.ts` (new)
+- `e2e/support/seed.ts`
 
 ## Change Log
 
 | Date | Change |
 |------|--------|
+| 2026-09-29 | Implemented. One `lateral`, one `coalesce`, a delete button gated to owners, and a `Rejoint` marker. |
 | 2026-09-29 | Story created, after a user asked the question the AC had been asking all along: how does a signed-in contributor get back to a Room they do not own? Separates what is already true (the Room itself is not session-scoped and needs nothing) from what is not (Home lists only Rooms you created). Scopes "stats" to one number — your own contribution count — leaving Epic 5's screen alone. |
